@@ -1,0 +1,32 @@
+---
+import Editor from "../components/Editor";
+import "../styles/global.css";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CraftCut - DIY Furniture Planner</title>
+    <meta
+      name="description"
+      content="Design furniture visually, get perfect cut lists instantly. Free DIY furniture planning tool."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <style>
+      @media print {
+        .no-print {
+          display: none !important;
+        }
+        body {
+          background: white !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <Editor client:only="react" />
+  </body>
+</html>
