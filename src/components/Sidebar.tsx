@@ -118,14 +118,14 @@ export default function Sidebar() {
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">
-                  Y Position (mm)
+                  Y Position (mm) <span className="text-gray-400">↑+</span>
                 </label>
                 <input
                   type="number"
-                  value={Math.round(selectedPanel.y)}
+                  value={Math.round(-selectedPanel.y)}
                   onChange={(e) =>
                     updatePanel(selectedPanel.id, {
-                      y: parseInt(e.target.value) || 0,
+                      y: -(parseInt(e.target.value) || 0),
                     })
                   }
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"

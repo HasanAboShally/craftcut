@@ -445,6 +445,9 @@ export default function Canvas() {
     [getSnapPoints, panels, settings.thickness],
   );
 
+  // Track whether we've auto-centered on initial load
+  const hasAutoCentered = useRef(false);
+
   // Resize observer to track container size
   useEffect(() => {
     const container = containerRef.current;
@@ -505,6 +508,21 @@ export default function Canvas() {
         (canvasSize.height - contentHeight * fitZoom) / 2,
     });
   }, [panels, handleResetZoom, canvasSize]);
+
+  // Auto-center on panels when canvas first loads with content
+  useEffect(() => {
+    if (hasAutoCentered.current || panels.length === 0 || canvasSize.width === 0) return;
+    
+    // Wait a tick for canvas size to settle
+    const timer = setTimeout(() => {
+      if (panels.length > 0 && canvasSize.width > 0 && canvasSize.height > 0) {
+        handleFitToContent();
+        hasAutoCentered.current = true;
+      }
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, [panels.length, canvasSize, handleFitToContent]);
 
   // Copy selected panel
   const handleCopy = useCallback(() => {
@@ -967,7 +985,7 @@ export default function Canvas() {
     );
   };
 
-  // Render vertical ruler (left)
+  // Render vertical ruler (left) - displays inverted Y (positive = UP)
   const renderVerticalRuler = () => {
     if (!showRulers) return null;
     
@@ -975,13 +993,15 @@ export default function Canvas() {
     const rulerStep = zoom > 0.5 ? 50 : zoom > 0.2 ? 100 : 200; // mm between major ticks
     const minorStep = rulerStep / 5;
     
-    // Calculate visible range in mm
+    // Calculate visible range in mm (internal coords, Y+ = down)
     const startMm = Math.floor(viewBoxY / rulerStep) * rulerStep - rulerStep;
     const endMm = viewBoxY + viewBoxHeight + rulerStep;
     
-    // Major ticks with labels
+    // Major ticks with labels - show INVERTED values (so positive = up)
     for (let mm = startMm; mm <= endMm; mm += rulerStep) {
-      if (mm < 0) continue;
+      // Display inverted: internal Y=100 shows as -100 (below floor)
+      // internal Y=-100 shows as 100 (above floor)
+      const displayValue = -mm;
       elements.push(
         <g key={`vtick-${mm}`}>
           <line
@@ -998,7 +1018,7 @@ export default function Canvas() {
             fontSize={9 / zoom}
             fill="#666"
           >
-            {mm}
+            {displayValue}
           </text>
         </g>
       );
@@ -1006,7 +1026,7 @@ export default function Canvas() {
     
     // Minor ticks
     for (let mm = startMm; mm <= endMm; mm += minorStep) {
-      if (mm < 0 || mm % rulerStep === 0) continue;
+      if (mm % rulerStep === 0) continue;
       elements.push(
         <line
           key={`vminor-${mm}`}
@@ -1538,13 +1558,13 @@ export default function Canvas() {
           </button>
         </div>
 
-        {/* Position info panel */}
+        {/* Position info panel - shows inverted Y (positive = UP) */}
         {calculateGaps && (
           <div className="flex items-center gap-3 text-xs bg-white border border-gray-200 rounded px-2 py-1 shadow-sm">
             <div className="flex items-center gap-2 border-r border-gray-200 pr-3">
               <span className="text-gray-500 font-medium">Position</span>
               <span className="font-mono text-gray-700">
-                ({Math.round(calculateGaps.panel.x)}, {Math.round(calculateGaps.panel.y)})
+                ({Math.round(calculateGaps.panel.x)}, {Math.round(-calculateGaps.panel.y)})
               </span>
             </div>
             <div className="flex items-center gap-2 border-r border-gray-200 pr-3">
@@ -1554,9 +1574,9 @@ export default function Canvas() {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-gray-500 font-medium">Bottom edge</span>
+              <span className="text-gray-500 font-medium">Top edge</span>
               <span className="font-mono text-gray-700">
-                Y = {Math.round(calculateGaps.panel.y + calculateGaps.visible.height)}
+                Y = {Math.round(-calculateGaps.panel.y)}
               </span>
             </div>
             {(calculateGaps.gapAbove || calculateGaps.gapBelow || calculateGaps.gapLeft || calculateGaps.gapRight) && (

@@ -249,17 +249,17 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
   const thickness = settings.thickness || 18;
   const furnitureDepth = 300; // mm
   const SCALE = 0.01; // Convert mm to scene units
-  
-  // This must match the MIN_VISUAL_HEIGHT in Canvas.tsx
-  // The 2D canvas enlarges thin panels visually, so positions are based on enlarged sizes
-  const MIN_VISUAL_HEIGHT_2D = 80;
 
   // Convert 2D panels to 3D positions and sizes
   const { panels3D, center, maxDimension } = useMemo(() => {
     if (panels.length === 0) return { panels3D: [], center: [0, 0, 0] as [number, number, number], maxDimension: 1 };
 
-    const minX = Math.min(...panels.map((p) => p.x));
-    const minY = Math.min(...panels.map((p) => p.y));
+    // In 2D: internal Y increases downward (screen coords)
+    // In 3D: Y increases upward (real world)
+    // The visual display inverts Y, but internally panel.y is still screen coords
+    
+    // This must match the MIN_VISUAL_HEIGHT in Canvas.tsx
+    const MIN_VISUAL_HEIGHT_2D = 80;
 
     // Get the VISUAL height as used in 2D canvas (with enlargement)
     const getVisualHeight = (p: (typeof panels)[0]) => {
@@ -281,29 +281,23 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
       return p.width;
     };
 
-    // Calculate the extent using VISUAL dimensions (to match 2D positioning)
-    // The 2D canvas uses enlarged visual heights, so panel.y positions are based on those
-    const maxYExtentVisual = Math.max(
-      ...panels.map((p) => p.y + getVisualHeight(p)),
-    );
-    const totalVisualHeight = maxYExtentVisual - minY;
-
-    // Calculate bounds
+    // Calculate bounds in 2D internal coordinates
+    const minX = Math.min(...panels.map((p) => p.x));
     const maxX = Math.max(...panels.map((p) => p.x + getTrueVisibleWidth(p)));
     
-    // Calculate the true total height for proper 3D scaling
-    const trueMaxYExtent = Math.max(...panels.map((p) => {
-      const trueH = getTrueVisibleHeight(p);
-      return p.y + trueH;
-    }));
-    const totalHeight = trueMaxYExtent - minY;
+    // For Y, we need to consider VISUAL positions since that's how users aligned them
+    // The VISUAL bottom edge of each panel is at: panel.y + getVisualHeight(panel)
+    // We use the visual bottom as the reference for alignment
+    const minVisualY = Math.min(...panels.map((p) => p.y));
+    const maxVisualY = Math.max(...panels.map((p) => p.y + getVisualHeight(p)));
+    const totalVisualHeight = maxVisualY - minVisualY;
     
-    // Calculate center in 3D space (Y is up in 3D)
+    // Calculate center in 3D space
     const widthInUnits = (maxX - minX) * SCALE;
-    const heightInUnits = totalHeight * SCALE;
+    const heightInUnits = totalVisualHeight * SCALE;
     const depthInUnits = furnitureDepth * SCALE;
     
-    const centerX = 0; // Already centered by x3d calculation
+    const centerX = 0;
     const centerY = heightInUnits / 2;
     const centerZ = 0;
     
@@ -317,34 +311,43 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
       const panelT = thickness * SCALE;
       const depth = furnitureDepth * SCALE;
 
-      // X position (left-right) - center around 0
-      const centerXOffset = ((maxX - minX) / 2) * SCALE;
-      const x3d = (panel.x - minX) * SCALE - centerXOffset;
+      // X position: center the design around 0
+      const totalWidth = maxX - minX;
+      const x3d = ((panel.x - minX) - totalWidth / 2) * SCALE;
 
-      // The key insight: in 2D, panels are positioned based on VISUAL heights
-      // So a panel at visual Y position needs to be converted to true position
-      // The visual enlargement is (visualHeight - trueHeight)
-      // Panels are aligned by their visual BOTTOM edges in 2D
-      // So in 3D, we position based on where the TRUE bottom edge should be
+      // Y position: In 2D, panels are positioned by their VISUAL top-left corner.
+      // The VISUAL bottom of a panel is at: panel.y + visualHeight
+      // In 3D, Y=0 is the floor, Y increases upward.
+      // We want the VISUAL bottoms to align, and then convert to 3D.
+      // 
+      // VISUAL bottom in 2D = panel.y + visualHeight
+      // TRUE bottom (what we show in 3D) should be at same relative position
+      // 
+      // In 2D coords: maxVisualY is the floor (lowest point visually on screen = highest Y value)
+      // In 3D: this becomes Y=0
+      // 
+      // For a panel:
+      //   - Its visual bottom is at panel.y + visualHeight (in 2D internal coords)
+      //   - Distance from floor (maxVisualY) to visual bottom = maxVisualY - (panel.y + visualHeight)
+      //   - In 3D, this becomes the Y position of the true bottom
       
-      const visualH = getVisualHeight(panel);
-      const trueH = getTrueVisibleHeight(panel);
-      const enlargement = visualH - trueH;
+      const visualHeight = getVisualHeight(panel);
+      const trueHeight = getTrueVisibleHeight(panel);
+      const trueWidth = getTrueVisibleWidth(panel);
       
-      // In 2D: panel goes from panel.y (top) to panel.y + visualH (bottom)
-      // The TRUE bottom edge should be at: panel.y + visualH (same as visual bottom)
-      // The TRUE top edge should be at: panel.y + visualH - trueH
-      // In 3D (Y up): we flip this
+      // Visual bottom in 2D internal coords
+      const visualBottom2D = panel.y + visualHeight;
       
+      // Distance from floor (maxVisualY) to visual bottom - this becomes Y position in 3D
+      const distanceFromFloor = maxVisualY - visualBottom2D;
+      
+      // In 3D, the bottom of the TRUE box should be at distanceFromFloor
+      // The center of the box is at distanceFromFloor + trueHeight/2
+      const y3d = distanceFromFloor * SCALE + (trueHeight * SCALE) / 2;
+
       switch (orientation) {
         case "horizontal": {
           // Shelf: horizontal panel - thickness tall in 3D Y
-          // Visual bottom is at panel.y + visualH, true bottom should match
-          // TRUE bottom = panel.y + visualH - trueH + trueH = panel.y + visualH
-          // So the true center in Y (before flipping) = panel.y + visualH - trueH/2
-          const trueCenterY2D = panel.y + visualH - trueH / 2;
-          // Flip for 3D (Y up from 0)
-          const y3d = (totalVisualHeight - (trueCenterY2D - minY)) * SCALE;
           return {
             id: panel.id,
             position: [x3d + panelW / 2, y3d, 0] as [number, number, number],
@@ -354,9 +357,6 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
 
         case "vertical": {
           // Side panel: vertical orientation - panel.height tall in 3D Y
-          // Visual bottom is at panel.y + visualH, true bottom should match
-          const trueCenterY2D = panel.y + visualH - trueH / 2;
-          const y3d = (totalVisualHeight - (trueCenterY2D - minY)) * SCALE;
           return {
             id: panel.id,
             position: [x3d + panelT / 2, y3d, 0] as [number, number, number],
@@ -366,8 +366,6 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
 
         case "back": {
           // Back panel: at the back - panel.height tall in 3D Y
-          const trueCenterY2D = panel.y + visualH - trueH / 2;
-          const y3d = (totalVisualHeight - (trueCenterY2D - minY)) * SCALE;
           return {
             id: panel.id,
             position: [x3d + panelW / 2, y3d, depth / 2 - panelT / 2] as [
@@ -380,8 +378,6 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
         }
 
         default: {
-          const trueCenterY2D = panel.y + visualH - trueH / 2;
-          const y3d = (totalVisualHeight - (trueCenterY2D - minY)) * SCALE;
           return {
             id: panel.id,
             position: [x3d + panelW / 2, y3d, 0] as [number, number, number],
@@ -396,7 +392,7 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
       center: [centerX, centerY, centerZ] as [number, number, number],
       maxDimension: maxDim
     };
-  }, [panels, thickness, furnitureDepth, SCALE, MIN_VISUAL_HEIGHT_2D]);
+  }, [panels, thickness, furnitureDepth, SCALE]);
 
   // Notify parent of bounds for camera positioning
   useEffect(() => {
