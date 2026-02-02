@@ -1,7 +1,7 @@
 import { OrbitControls } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { Box } from "lucide-react";
-import { useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { useDesignStore } from "../stores/designStore";
 
@@ -243,7 +243,7 @@ function WoodPanel({
 }
 
 // 3D Scene with all furniture panels
-function FurnitureScene() {
+function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: [number, number, number], size: number) => void }) {
   const { panels, settings } = useDesignStore();
 
   const thickness = settings.thickness || 18;
@@ -251,10 +251,11 @@ function FurnitureScene() {
   const SCALE = 0.01; // Convert mm to scene units
 
   // Convert 2D panels to 3D positions and sizes
-  const panels3D = useMemo(() => {
-    if (panels.length === 0) return [];
+  const { panels3D, center, maxDimension } = useMemo(() => {
+    if (panels.length === 0) return { panels3D: [], center: [0, 0, 0] as [number, number, number], maxDimension: 1 };
 
     const minX = Math.min(...panels.map((p) => p.x));
+    const minY = Math.min(...panels.map((p) => p.y));
 
     const getVisibleHeight = (p: (typeof panels)[0]) => {
       const orient = p.orientation || "horizontal";
@@ -262,22 +263,31 @@ function FurnitureScene() {
       return p.height;
     };
 
+    const getVisibleWidth = (p: (typeof panels)[0]) => {
+      const orient = p.orientation || "horizontal";
+      if (orient === "vertical") return thickness;
+      return p.width;
+    };
+
     const maxYExtent = Math.max(
       ...panels.map((p) => p.y + getVisibleHeight(p)),
     );
 
-    // Calculate center
-    const maxX = Math.max(
-      ...panels.map((p) => {
-        const orient = p.orientation || "horizontal";
-        if (orient === "vertical") return p.x + thickness;
-        return p.x + p.width;
-      }),
-    );
-    const centerX = ((maxX - minX) / 2) * SCALE;
-    const centerZ = (furnitureDepth / 2) * SCALE;
+    // Calculate bounds
+    const maxX = Math.max(...panels.map((p) => p.x + getVisibleWidth(p)));
+    
+    // Calculate center in 3D space (Y is up in 3D)
+    const widthInUnits = (maxX - minX) * SCALE;
+    const heightInUnits = (maxYExtent - minY) * SCALE;
+    const depthInUnits = furnitureDepth * SCALE;
+    
+    const centerX = 0; // Already centered by x3d calculation
+    const centerY = heightInUnits / 2;
+    const centerZ = 0;
+    
+    const maxDim = Math.max(widthInUnits, heightInUnits, depthInUnits);
 
-    return panels.map((panel) => {
+    const result = panels.map((panel) => {
       const orientation = panel.orientation || "horizontal";
 
       const panelW = panel.width * SCALE;
@@ -285,8 +295,9 @@ function FurnitureScene() {
       const panelT = thickness * SCALE;
       const depth = furnitureDepth * SCALE;
 
-      // X position (left-right)
-      const x3d = (panel.x - minX) * SCALE - centerX;
+      // X position (left-right) - center around 0
+      const centerXOffset = ((maxX - minX) / 2) * SCALE;
+      const x3d = (panel.x - minX) * SCALE - centerXOffset;
 
       // Y in 3D is UP (was Z in 2D)
       // 2D Y goes DOWN, 3D Y goes UP, so we flip
@@ -335,7 +346,20 @@ function FurnitureScene() {
         }
       }
     });
+    
+    return { 
+      panels3D: result, 
+      center: [centerX, centerY, centerZ] as [number, number, number],
+      maxDimension: maxDim
+    };
   }, [panels, thickness, furnitureDepth, SCALE]);
+
+  // Notify parent of bounds for camera positioning
+  useEffect(() => {
+    if (onBoundsCalculated && panels.length > 0) {
+      onBoundsCalculated(center, maxDimension);
+    }
+  }, [center, maxDimension, onBoundsCalculated, panels.length]);
 
   const woodColor = settings.woodColor || "#E8D4B8";
 
@@ -363,21 +387,62 @@ function FurnitureScene() {
         />
       ))}
 
-      {/* Floor shadow (optional) */}
+      {/* Floor grid for reference */}
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, -0.1, 0]}
+        position={[0, -0.05, 0]}
         receiveShadow
       >
-        <planeGeometry args={[20, 20]} />
-        <shadowMaterial opacity={0.1} />
+        <planeGeometry args={[50, 50]} />
+        <meshStandardMaterial color="#e5e7eb" opacity={0.5} transparent />
       </mesh>
     </>
   );
 }
 
+// Camera controller that auto-centers on furniture
+function CameraController({ target, distance }: { target: [number, number, number]; distance: number }) {
+  const { camera } = useThree();
+  const controlsRef = useRef<any>(null);
+  
+  useEffect(() => {
+    if (controlsRef.current) {
+      // Set the orbit target to the center of furniture
+      controlsRef.current.target.set(target[0], target[1], target[2]);
+      controlsRef.current.update();
+    }
+    
+    // Position camera based on furniture size
+    const cameraDistance = Math.max(distance * 3, 5);
+    camera.position.set(cameraDistance, cameraDistance * 0.8, cameraDistance);
+    camera.lookAt(target[0], target[1], target[2]);
+  }, [target, distance, camera]);
+
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      enablePan={true}
+      enableZoom={true}
+      enableRotate={true}
+      minDistance={0.5}
+      maxDistance={200}
+      target={target}
+      // Right-click or two-finger drag to pan
+      // Left-click to rotate
+      // Scroll to zoom
+    />
+  );
+}
+
 export default function Preview3D() {
   const { panels } = useDesignStore();
+  const [cameraTarget, setCameraTarget] = useState<[number, number, number]>([0, 0, 0]);
+  const [furnitureSize, setFurnitureSize] = useState(5);
+
+  const handleBoundsCalculated = useCallback((center: [number, number, number], size: number) => {
+    setCameraTarget(center);
+    setFurnitureSize(size);
+  }, []);
 
   // Calculate dimensions for display
   const dimensions = useMemo(() => {
@@ -398,7 +463,7 @@ export default function Preview3D() {
           <Box size={18} className="text-blue-600" />
           <span className="text-sm font-medium text-gray-700">3D Preview</span>
           <span className="text-xs text-gray-500">
-            Drag to rotate • Scroll to zoom
+            Drag to rotate • Right-click drag to pan • Scroll to zoom
           </span>
         </div>
       </div>
@@ -416,20 +481,14 @@ export default function Preview3D() {
           </div>
         ) : (
           <Canvas
-            camera={{ position: [5, 5, 5], fov: 50 }}
+            camera={{ position: [15, 15, 15], fov: 50 }}
             shadows
             style={{
               background: "linear-gradient(to bottom, #f1f5f9, #e2e8f0)",
             }}
           >
-            <FurnitureScene />
-            <OrbitControls
-              enablePan={true}
-              enableZoom={true}
-              enableRotate={true}
-              minDistance={2}
-              maxDistance={20}
-            />
+            <FurnitureScene onBoundsCalculated={handleBoundsCalculated} />
+            <CameraController target={cameraTarget} distance={furnitureSize} />
           </Canvas>
         )}
       </div>

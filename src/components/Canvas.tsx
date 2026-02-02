@@ -35,7 +35,7 @@ function getWoodColorVariants(baseColor: string) {
 // Guide line colors
 const GUIDE_COLOR = "#f43f5e"; // Rose/red for alignment guides
 const DISTANCE_COLOR = "#3b82f6"; // Blue for distance indicators
-const MIN_VISUAL_HEIGHT = 40; // Minimum visual height in 2D for easier grabbing
+const MIN_VISUAL_HEIGHT = 80; // Minimum visual height in 2D for easier grabbing
 
 // Get TRUE visible dimensions of panel in front view based on orientation
 // Returns { width, height } as seen from the front - used for calculations and 3D
