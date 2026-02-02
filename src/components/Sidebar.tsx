@@ -99,6 +99,42 @@ export default function Sidebar() {
               </div>
             </div>
 
+            {/* Position inputs */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  X Position (mm)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={Math.round(selectedPanel.x)}
+                  onChange={(e) =>
+                    updatePanel(selectedPanel.id, {
+                      x: Math.max(0, parseInt(e.target.value) || 0),
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  Y Position (mm)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={Math.round(selectedPanel.y)}
+                  onChange={(e) =>
+                    updatePanel(selectedPanel.id, {
+                      y: Math.max(0, parseInt(e.target.value) || 0),
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                />
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs text-gray-500 mb-1">
                 Quantity

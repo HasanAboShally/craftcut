@@ -1,5 +1,5 @@
-import { Hand, Maximize, MousePointer2, ZoomIn, ZoomOut } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Hand, Maximize, MousePointer2, Ruler, ZoomIn, ZoomOut } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDesignStore } from "../stores/designStore";
 import type { Panel } from "../types";
 
@@ -11,6 +11,7 @@ const DEFAULT_ZOOM = 0.3;
 const NUDGE_AMOUNT = 10;
 const NUDGE_AMOUNT_LARGE = 50;
 const SNAP_THRESHOLD = 15; // pixels for snapping
+const RULER_SIZE = 24; // pixels for ruler width/height
 
 // Helper to generate wood color variants from a base color
 function getWoodColorVariants(baseColor: string) {
@@ -111,6 +112,88 @@ export default function Canvas() {
   const [distanceIndicators, setDistanceIndicators] = useState<
     DistanceIndicator[]
   >([]);
+  const [showRulers, setShowRulers] = useState(true);
+
+  // Calculate gaps between selected panel and adjacent panels
+  const calculateGaps = useMemo(() => {
+    if (!selectedPanelId) return null;
+    
+    const selectedPanel = panels.find(p => p.id === selectedPanelId);
+    if (!selectedPanel) return null;
+    
+    const selectedVisible = getVisibleDimensions(selectedPanel, settings.thickness);
+    const selectedLeft = selectedPanel.x;
+    const selectedRight = selectedPanel.x + selectedVisible.width;
+    const selectedTop = selectedPanel.y;
+    const selectedBottom = selectedPanel.y + selectedVisible.height;
+    
+    // Find closest panels in each direction
+    let gapAbove: { distance: number; panelLabel: string } | null = null;
+    let gapBelow: { distance: number; panelLabel: string } | null = null;
+    let gapLeft: { distance: number; panelLabel: string } | null = null;
+    let gapRight: { distance: number; panelLabel: string } | null = null;
+    
+    for (const panel of panels) {
+      if (panel.id === selectedPanelId) continue;
+      
+      const visible = getVisibleDimensions(panel, settings.thickness);
+      const left = panel.x;
+      const right = panel.x + visible.width;
+      const top = panel.y;
+      const bottom = panel.y + visible.height;
+      
+      // Check horizontal overlap for vertical gaps
+      const hasHorizontalOverlap = 
+        Math.max(selectedLeft, left) < Math.min(selectedRight, right);
+      
+      // Check vertical overlap for horizontal gaps  
+      const hasVerticalOverlap = 
+        Math.max(selectedTop, top) < Math.min(selectedBottom, bottom);
+      
+      if (hasHorizontalOverlap) {
+        // Panel above (its bottom is above our top)
+        if (bottom <= selectedTop) {
+          const distance = selectedTop - bottom;
+          if (!gapAbove || distance < gapAbove.distance) {
+            gapAbove = { distance, panelLabel: panel.label };
+          }
+        }
+        // Panel below (its top is below our bottom)
+        if (top >= selectedBottom) {
+          const distance = top - selectedBottom;
+          if (!gapBelow || distance < gapBelow.distance) {
+            gapBelow = { distance, panelLabel: panel.label };
+          }
+        }
+      }
+      
+      if (hasVerticalOverlap) {
+        // Panel to the left (its right is left of our left)
+        if (right <= selectedLeft) {
+          const distance = selectedLeft - right;
+          if (!gapLeft || distance < gapLeft.distance) {
+            gapLeft = { distance, panelLabel: panel.label };
+          }
+        }
+        // Panel to the right (its left is right of our right)
+        if (left >= selectedRight) {
+          const distance = left - selectedRight;
+          if (!gapRight || distance < gapRight.distance) {
+            gapRight = { distance, panelLabel: panel.label };
+          }
+        }
+      }
+    }
+    
+    return {
+      panel: selectedPanel,
+      visible: selectedVisible,
+      gapAbove,
+      gapBelow,
+      gapLeft,
+      gapRight,
+    };
+  }, [selectedPanelId, panels, settings.thickness]);
 
   // Get all snap points from other panels
   const getSnapPoints = useCallback(
@@ -742,6 +825,12 @@ export default function Canvas() {
     selectPanel,
   ]);
 
+  // Calculate viewBox based on zoom and pan (needed for rendering functions)
+  const viewBoxWidth = canvasSize.width / zoom;
+  const viewBoxHeight = canvasSize.height / zoom;
+  const viewBoxX = -pan.x / zoom;
+  const viewBoxY = -pan.y / zoom;
+
   const renderGrid = () => {
     const lines = [];
     // Calculate visible area based on canvas size and zoom
@@ -783,6 +872,286 @@ export default function Canvas() {
       );
     }
     return lines;
+  };
+
+  // Render horizontal ruler (top)
+  const renderHorizontalRuler = () => {
+    if (!showRulers) return null;
+    
+    const elements = [];
+    const rulerStep = zoom > 0.5 ? 50 : zoom > 0.2 ? 100 : 200; // mm between major ticks
+    const minorStep = rulerStep / 5;
+    
+    // Calculate visible range in mm
+    const startMm = Math.floor(viewBoxX / rulerStep) * rulerStep - rulerStep;
+    const endMm = viewBoxX + viewBoxWidth + rulerStep;
+    
+    // Major ticks with labels
+    for (let mm = startMm; mm <= endMm; mm += rulerStep) {
+      if (mm < 0) continue;
+      elements.push(
+        <g key={`htick-${mm}`}>
+          <line
+            x1={mm}
+            y1={viewBoxY}
+            x2={mm}
+            y2={viewBoxY + 12 / zoom}
+            stroke="#666"
+            strokeWidth={1 / zoom}
+          />
+          <text
+            x={mm + 3 / zoom}
+            y={viewBoxY + 20 / zoom}
+            fontSize={9 / zoom}
+            fill="#666"
+          >
+            {mm}
+          </text>
+        </g>
+      );
+    }
+    
+    // Minor ticks
+    for (let mm = startMm; mm <= endMm; mm += minorStep) {
+      if (mm < 0 || mm % rulerStep === 0) continue;
+      elements.push(
+        <line
+          key={`hminor-${mm}`}
+          x1={mm}
+          y1={viewBoxY}
+          x2={mm}
+          y2={viewBoxY + 6 / zoom}
+          stroke="#999"
+          strokeWidth={0.5 / zoom}
+        />
+      );
+    }
+    
+    return (
+      <g className="ruler-horizontal">
+        {/* Ruler background */}
+        <rect
+          x={viewBoxX}
+          y={viewBoxY}
+          width={viewBoxWidth}
+          height={RULER_SIZE / zoom}
+          fill="rgba(255,255,255,0.95)"
+        />
+        {elements}
+        {/* Bottom border */}
+        <line
+          x1={viewBoxX}
+          y1={viewBoxY + RULER_SIZE / zoom}
+          x2={viewBoxX + viewBoxWidth}
+          y2={viewBoxY + RULER_SIZE / zoom}
+          stroke="#ccc"
+          strokeWidth={1 / zoom}
+        />
+      </g>
+    );
+  };
+
+  // Render vertical ruler (left)
+  const renderVerticalRuler = () => {
+    if (!showRulers) return null;
+    
+    const elements = [];
+    const rulerStep = zoom > 0.5 ? 50 : zoom > 0.2 ? 100 : 200; // mm between major ticks
+    const minorStep = rulerStep / 5;
+    
+    // Calculate visible range in mm
+    const startMm = Math.floor(viewBoxY / rulerStep) * rulerStep - rulerStep;
+    const endMm = viewBoxY + viewBoxHeight + rulerStep;
+    
+    // Major ticks with labels
+    for (let mm = startMm; mm <= endMm; mm += rulerStep) {
+      if (mm < 0) continue;
+      elements.push(
+        <g key={`vtick-${mm}`}>
+          <line
+            x1={viewBoxX}
+            y1={mm}
+            x2={viewBoxX + 12 / zoom}
+            y2={mm}
+            stroke="#666"
+            strokeWidth={1 / zoom}
+          />
+          <text
+            x={viewBoxX + 14 / zoom}
+            y={mm + 3 / zoom}
+            fontSize={9 / zoom}
+            fill="#666"
+          >
+            {mm}
+          </text>
+        </g>
+      );
+    }
+    
+    // Minor ticks
+    for (let mm = startMm; mm <= endMm; mm += minorStep) {
+      if (mm < 0 || mm % rulerStep === 0) continue;
+      elements.push(
+        <line
+          key={`vminor-${mm}`}
+          x1={viewBoxX}
+          y1={mm}
+          x2={viewBoxX + 6 / zoom}
+          y2={mm}
+          stroke="#999"
+          strokeWidth={0.5 / zoom}
+        />
+      );
+    }
+    
+    return (
+      <g className="ruler-vertical">
+        {/* Ruler background */}
+        <rect
+          x={viewBoxX}
+          y={viewBoxY}
+          width={RULER_SIZE / zoom}
+          height={viewBoxHeight}
+          fill="rgba(255,255,255,0.95)"
+        />
+        {elements}
+        {/* Right border */}
+        <line
+          x1={viewBoxX + RULER_SIZE / zoom}
+          y1={viewBoxY}
+          x2={viewBoxX + RULER_SIZE / zoom}
+          y2={viewBoxY + viewBoxHeight}
+          stroke="#ccc"
+          strokeWidth={1 / zoom}
+        />
+      </g>
+    );
+  };
+
+  // Render position indicator for selected panel
+  const renderSelectedPanelIndicator = () => {
+    if (!calculateGaps) return null;
+    
+    const { panel, visible, gapAbove, gapBelow, gapLeft, gapRight } = calculateGaps;
+    const elements = [];
+    
+    // Gap indicators - lines showing distance to adjacent panels
+    const indicatorColor = "#8b5cf6"; // Purple for gap indicators
+    
+    // Gap above
+    if (gapAbove && gapAbove.distance > 0) {
+      const x = panel.x + visible.width / 2;
+      const y1 = panel.y;
+      const y2 = panel.y - gapAbove.distance;
+      
+      elements.push(
+        <g key="gap-above">
+          <line x1={x} y1={y1} x2={x} y2={y2} stroke={indicatorColor} strokeWidth={2 / zoom} strokeDasharray={`${4/zoom},${4/zoom}`} />
+          <line x1={x - 8/zoom} y1={y1} x2={x + 8/zoom} y2={y1} stroke={indicatorColor} strokeWidth={2/zoom} />
+          <line x1={x - 8/zoom} y1={y2} x2={x + 8/zoom} y2={y2} stroke={indicatorColor} strokeWidth={2/zoom} />
+          <rect x={x - 25/zoom} y={(y1+y2)/2 - 10/zoom} width={50/zoom} height={20/zoom} fill={indicatorColor} rx={4/zoom} />
+          <text x={x} y={(y1+y2)/2 + 4/zoom} textAnchor="middle" fontSize={11/zoom} fill="white" fontWeight={600}>
+            {Math.round(gapAbove.distance)}
+          </text>
+        </g>
+      );
+    }
+    
+    // Gap below
+    if (gapBelow && gapBelow.distance > 0) {
+      const x = panel.x + visible.width / 2;
+      const y1 = panel.y + visible.height;
+      const y2 = y1 + gapBelow.distance;
+      
+      elements.push(
+        <g key="gap-below">
+          <line x1={x} y1={y1} x2={x} y2={y2} stroke={indicatorColor} strokeWidth={2 / zoom} strokeDasharray={`${4/zoom},${4/zoom}`} />
+          <line x1={x - 8/zoom} y1={y1} x2={x + 8/zoom} y2={y1} stroke={indicatorColor} strokeWidth={2/zoom} />
+          <line x1={x - 8/zoom} y1={y2} x2={x + 8/zoom} y2={y2} stroke={indicatorColor} strokeWidth={2/zoom} />
+          <rect x={x - 25/zoom} y={(y1+y2)/2 - 10/zoom} width={50/zoom} height={20/zoom} fill={indicatorColor} rx={4/zoom} />
+          <text x={x} y={(y1+y2)/2 + 4/zoom} textAnchor="middle" fontSize={11/zoom} fill="white" fontWeight={600}>
+            {Math.round(gapBelow.distance)}
+          </text>
+        </g>
+      );
+    }
+    
+    // Gap left
+    if (gapLeft && gapLeft.distance > 0) {
+      const y = panel.y + visible.height / 2;
+      const x1 = panel.x;
+      const x2 = panel.x - gapLeft.distance;
+      
+      elements.push(
+        <g key="gap-left">
+          <line x1={x1} y1={y} x2={x2} y2={y} stroke={indicatorColor} strokeWidth={2 / zoom} strokeDasharray={`${4/zoom},${4/zoom}`} />
+          <line x1={x1} y1={y - 8/zoom} x2={x1} y2={y + 8/zoom} stroke={indicatorColor} strokeWidth={2/zoom} />
+          <line x1={x2} y1={y - 8/zoom} x2={x2} y2={y + 8/zoom} stroke={indicatorColor} strokeWidth={2/zoom} />
+          <rect x={(x1+x2)/2 - 25/zoom} y={y - 10/zoom} width={50/zoom} height={20/zoom} fill={indicatorColor} rx={4/zoom} />
+          <text x={(x1+x2)/2} y={y + 4/zoom} textAnchor="middle" fontSize={11/zoom} fill="white" fontWeight={600}>
+            {Math.round(gapLeft.distance)}
+          </text>
+        </g>
+      );
+    }
+    
+    // Gap right
+    if (gapRight && gapRight.distance > 0) {
+      const y = panel.y + visible.height / 2;
+      const x1 = panel.x + visible.width;
+      const x2 = x1 + gapRight.distance;
+      
+      elements.push(
+        <g key="gap-right">
+          <line x1={x1} y1={y} x2={x2} y2={y} stroke={indicatorColor} strokeWidth={2 / zoom} strokeDasharray={`${4/zoom},${4/zoom}`} />
+          <line x1={x1} y1={y - 8/zoom} x2={x1} y2={y + 8/zoom} stroke={indicatorColor} strokeWidth={2/zoom} />
+          <line x1={x2} y1={y - 8/zoom} x2={x2} y2={y + 8/zoom} stroke={indicatorColor} strokeWidth={2/zoom} />
+          <rect x={(x1+x2)/2 - 25/zoom} y={y - 10/zoom} width={50/zoom} height={20/zoom} fill={indicatorColor} rx={4/zoom} />
+          <text x={(x1+x2)/2} y={y + 4/zoom} textAnchor="middle" fontSize={11/zoom} fill="white" fontWeight={600}>
+            {Math.round(gapRight.distance)}
+          </text>
+        </g>
+      );
+    }
+    
+    return <>{elements}</>;
+  };
+
+  // Render the ground line (Y=0 reference)
+  const renderGroundLine = () => {
+    if (viewBoxY > 0 || viewBoxY + viewBoxHeight < 0) return null;
+    
+    return (
+      <g className="ground-line">
+        <line
+          x1={viewBoxX}
+          y1={0}
+          x2={viewBoxX + viewBoxWidth}
+          y2={0}
+          stroke="#10b981"
+          strokeWidth={2 / zoom}
+          strokeDasharray={`${8/zoom},${4/zoom}`}
+        />
+        <rect
+          x={viewBoxX + 5/zoom}
+          y={-14/zoom}
+          width={60/zoom}
+          height={16/zoom}
+          fill="#10b981"
+          rx={3/zoom}
+        />
+        <text
+          x={viewBoxX + 35/zoom}
+          y={-2/zoom}
+          textAnchor="middle"
+          fontSize={10/zoom}
+          fill="white"
+          fontWeight={600}
+        >
+          Y = 0
+        </text>
+      </g>
+    );
   };
 
   const renderPanel = (panel: Panel, index: number) => {
@@ -1057,12 +1426,6 @@ export default function Canvas() {
     );
   };
 
-  // Calculate viewBox based on zoom and pan
-  const viewBoxWidth = canvasSize.width / zoom;
-  const viewBoxHeight = canvasSize.height / zoom;
-  const viewBoxX = -pan.x / zoom;
-  const viewBoxY = -pan.y / zoom;
-
   // Determine cursor based on current state
   const getCursor = () => {
     if (isPanning) return "grabbing";
@@ -1120,7 +1483,72 @@ export default function Canvas() {
           >
             <Maximize size={18} />
           </button>
+
+          <div className="w-px h-6 bg-gray-200 mx-2" />
+
+          {/* Ruler toggle */}
+          <button
+            onClick={() => setShowRulers(!showRulers)}
+            className={`p-1.5 rounded transition-colors ${showRulers ? "bg-blue-100 text-blue-600" : "text-gray-600 hover:text-gray-800 hover:bg-gray-200"}`}
+            title="Toggle rulers"
+          >
+            <Ruler size={18} />
+          </button>
         </div>
+
+        {/* Position info panel */}
+        {calculateGaps && (
+          <div className="flex items-center gap-3 text-xs bg-white border border-gray-200 rounded px-2 py-1 shadow-sm">
+            <div className="flex items-center gap-2 border-r border-gray-200 pr-3">
+              <span className="text-gray-500 font-medium">Position</span>
+              <span className="font-mono text-gray-700">
+                ({Math.round(calculateGaps.panel.x)}, {Math.round(calculateGaps.panel.y)})
+              </span>
+            </div>
+            <div className="flex items-center gap-2 border-r border-gray-200 pr-3">
+              <span className="text-gray-500 font-medium">Size</span>
+              <span className="font-mono text-gray-700">
+                {Math.round(calculateGaps.visible.width)} × {Math.round(calculateGaps.visible.height)} mm
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-500 font-medium">Bottom edge</span>
+              <span className="font-mono text-gray-700">
+                Y = {Math.round(calculateGaps.panel.y + calculateGaps.visible.height)}
+              </span>
+            </div>
+            {(calculateGaps.gapAbove || calculateGaps.gapBelow || calculateGaps.gapLeft || calculateGaps.gapRight) && (
+              <>
+                <div className="w-px h-4 bg-gray-300" />
+                <div className="flex items-center gap-2">
+                  <span className="text-purple-600 font-medium">Clearance</span>
+                  <div className="flex items-center gap-1.5">
+                    {calculateGaps.gapAbove && (
+                      <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                        ↑ {Math.round(calculateGaps.gapAbove.distance)}mm
+                      </span>
+                    )}
+                    {calculateGaps.gapBelow && (
+                      <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                        ↓ {Math.round(calculateGaps.gapBelow.distance)}mm
+                      </span>
+                    )}
+                    {calculateGaps.gapLeft && (
+                      <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                        ← {Math.round(calculateGaps.gapLeft.distance)}mm
+                      </span>
+                    )}
+                    {calculateGaps.gapRight && (
+                      <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                        → {Math.round(calculateGaps.gapRight.distance)}mm
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center gap-3 text-xs text-gray-400">
           {clipboard && <span className="text-green-600">📋 Copied</span>}
@@ -1254,6 +1682,27 @@ export default function Canvas() {
             >
               Click "Add Panel" to start designing your furniture
             </text>
+          )}
+
+          {/* Ground line (Y=0 reference) */}
+          {renderGroundLine()}
+
+          {/* Gap indicators for selected panel */}
+          {renderSelectedPanelIndicator()}
+
+          {/* Rulers - rendered last to be on top */}
+          {renderVerticalRuler()}
+          {renderHorizontalRuler()}
+          
+          {/* Ruler corner box */}
+          {showRulers && (
+            <rect
+              x={viewBoxX}
+              y={viewBoxY}
+              width={RULER_SIZE / zoom}
+              height={RULER_SIZE / zoom}
+              fill="rgba(255,255,255,0.95)"
+            />
           )}
         </svg>
       </div>
