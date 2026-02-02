@@ -257,28 +257,33 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
     const minX = Math.min(...panels.map((p) => p.x));
     const minY = Math.min(...panels.map((p) => p.y));
 
-    const getVisibleHeight = (p: (typeof panels)[0]) => {
+    // Get the TRUE visible dimensions (not enlarged for 2D display)
+    const getTrueVisibleHeight = (p: (typeof panels)[0]) => {
       const orient = p.orientation || "horizontal";
       if (orient === "horizontal") return thickness;
       return p.height;
     };
 
-    const getVisibleWidth = (p: (typeof panels)[0]) => {
+    const getTrueVisibleWidth = (p: (typeof panels)[0]) => {
       const orient = p.orientation || "horizontal";
       if (orient === "vertical") return thickness;
       return p.width;
     };
 
+    // Calculate the extent using TRUE dimensions
     const maxYExtent = Math.max(
-      ...panels.map((p) => p.y + getVisibleHeight(p)),
+      ...panels.map((p) => p.y + getTrueVisibleHeight(p)),
     );
 
     // Calculate bounds
-    const maxX = Math.max(...panels.map((p) => p.x + getVisibleWidth(p)));
+    const maxX = Math.max(...panels.map((p) => p.x + getTrueVisibleWidth(p)));
+    
+    // Total height from minY to maxYExtent
+    const totalHeight = maxYExtent - minY;
     
     // Calculate center in 3D space (Y is up in 3D)
     const widthInUnits = (maxX - minX) * SCALE;
-    const heightInUnits = (maxYExtent - minY) * SCALE;
+    const heightInUnits = totalHeight * SCALE;
     const depthInUnits = furnitureDepth * SCALE;
     
     const centerX = 0; // Already centered by x3d calculation
@@ -299,12 +304,15 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
       const centerXOffset = ((maxX - minX) / 2) * SCALE;
       const x3d = (panel.x - minX) * SCALE - centerXOffset;
 
-      // Y in 3D is UP (was Z in 2D)
-      // 2D Y goes DOWN, 3D Y goes UP, so we flip
+      // Y in 3D is UP (was Y down in 2D)
+      // Convert from 2D coordinates (Y down from minY) to 3D (Y up from 0)
+      // panel.y is the TOP edge in 2D, we need to flip and offset
       switch (orientation) {
         case "horizontal": {
-          // Shelf: horizontal panel
-          const y3d = (maxYExtent - panel.y - thickness / 2) * SCALE;
+          // Shelf: horizontal panel - thickness tall in 3D Y
+          // In 2D, panel.y is the top edge of the visible thickness
+          // The center in 3D Y = totalHeight - (panel.y - minY) - thickness/2
+          const y3d = (totalHeight - (panel.y - minY) - thickness / 2) * SCALE;
           return {
             id: panel.id,
             position: [x3d + panelW / 2, y3d, 0] as [number, number, number],
@@ -313,8 +321,10 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
         }
 
         case "vertical": {
-          // Side panel: vertical orientation
-          const y3d = (maxYExtent - panel.y - panel.height / 2) * SCALE;
+          // Side panel: vertical orientation - panel.height tall in 3D Y
+          // In 2D, panel.y is the top edge, panel extends down by panel.height
+          // The center in 3D Y = totalHeight - (panel.y - minY) - panel.height/2
+          const y3d = (totalHeight - (panel.y - minY) - panel.height / 2) * SCALE;
           return {
             id: panel.id,
             position: [x3d + panelT / 2, y3d, 0] as [number, number, number],
@@ -323,8 +333,8 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
         }
 
         case "back": {
-          // Back panel: at the back
-          const y3d = (maxYExtent - panel.y - panel.height / 2) * SCALE;
+          // Back panel: at the back - panel.height tall in 3D Y
+          const y3d = (totalHeight - (panel.y - minY) - panel.height / 2) * SCALE;
           return {
             id: panel.id,
             position: [x3d + panelW / 2, y3d, depth / 2 - panelT / 2] as [
@@ -337,7 +347,7 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
         }
 
         default: {
-          const y3d = (maxYExtent - panel.y - thickness / 2) * SCALE;
+          const y3d = (totalHeight - (panel.y - minY) - thickness / 2) * SCALE;
           return {
             id: panel.id,
             position: [x3d + panelW / 2, y3d, 0] as [number, number, number],
