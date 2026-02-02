@@ -35,10 +35,11 @@ function getWoodColorVariants(baseColor: string) {
 // Guide line colors
 const GUIDE_COLOR = "#f43f5e"; // Rose/red for alignment guides
 const DISTANCE_COLOR = "#3b82f6"; // Blue for distance indicators
+const MIN_VISUAL_HEIGHT = 40; // Minimum visual height in 2D for easier grabbing
 
-// Get visible dimensions of panel in front view based on orientation
-// Returns { width, height } as seen from the front
-function getVisibleDimensions(
+// Get TRUE visible dimensions of panel in front view based on orientation
+// Returns { width, height } as seen from the front - used for calculations and 3D
+function getTrueVisibleDimensions(
   panel: Panel,
   thickness: number,
 ): { width: number; height: number } {
@@ -57,6 +58,20 @@ function getVisibleDimensions(
     default:
       return { width: panel.width, height: panel.height };
   }
+}
+
+// Get visible dimensions for 2D canvas display with minimum size for usability
+// This makes thin panels (like horizontal shelves) easier to click and drag
+function getVisibleDimensions(
+  panel: Panel,
+  thickness: number,
+): { width: number; height: number; actualHeight: number } {
+  const trueDims = getTrueVisibleDimensions(panel, thickness);
+  return {
+    width: Math.max(MIN_VISUAL_HEIGHT, trueDims.width),
+    height: Math.max(MIN_VISUAL_HEIGHT, trueDims.height),
+    actualHeight: trueDims.height, // Keep track of actual for display
+  };
 }
 
 // Snap guide types
@@ -114,14 +129,14 @@ export default function Canvas() {
   >([]);
   const [showRulers, setShowRulers] = useState(true);
 
-  // Calculate gaps between selected panel and adjacent panels
+  // Calculate gaps between selected panel and adjacent panels (use TRUE dimensions for accuracy)
   const calculateGaps = useMemo(() => {
     if (!selectedPanelId) return null;
     
     const selectedPanel = panels.find(p => p.id === selectedPanelId);
     if (!selectedPanel) return null;
     
-    const selectedVisible = getVisibleDimensions(selectedPanel, settings.thickness);
+    const selectedVisible = getTrueVisibleDimensions(selectedPanel, settings.thickness);
     const selectedLeft = selectedPanel.x;
     const selectedRight = selectedPanel.x + selectedVisible.width;
     const selectedTop = selectedPanel.y;
@@ -136,7 +151,7 @@ export default function Canvas() {
     for (const panel of panels) {
       if (panel.id === selectedPanelId) continue;
       
-      const visible = getVisibleDimensions(panel, settings.thickness);
+      const visible = getTrueVisibleDimensions(panel, settings.thickness);
       const left = panel.x;
       const right = panel.x + visible.width;
       const top = panel.y;
@@ -195,7 +210,7 @@ export default function Canvas() {
     };
   }, [selectedPanelId, panels, settings.thickness]);
 
-  // Get all snap points from other panels
+  // Get all snap points from other panels (use TRUE dimensions for accuracy)
   const getSnapPoints = useCallback(
     (excludeId: string) => {
       const points: { x: number[]; y: number[] } = { x: [], y: [] };
@@ -210,7 +225,7 @@ export default function Canvas() {
 
       panels.forEach((p) => {
         if (p.id === excludeId) return;
-        const visible = getVisibleDimensions(p, settings.thickness);
+        const visible = getTrueVisibleDimensions(p, settings.thickness);
 
         const left = p.x;
         const right = p.x + visible.width;
@@ -616,7 +631,8 @@ export default function Canvas() {
         const draggedPanel = panels.find((p) => p.id === dragging);
         if (!draggedPanel) return;
 
-        const visible = getVisibleDimensions(draggedPanel, settings.thickness);
+        // Use TRUE dimensions for snapping calculations
+        const visible = getTrueVisibleDimensions(draggedPanel, settings.thickness);
         const rawX = panelStart.x + dx;
         const rawY = panelStart.y + dy;
 
@@ -647,8 +663,8 @@ export default function Canvas() {
           : Math.round(rawY / GRID_SIZE) * GRID_SIZE;
 
         updatePanel(dragging, {
-          x: Math.max(0, finalX),
-          y: Math.max(0, finalY),
+          x: finalX,
+          y: finalY,
         });
       } else if (resizing) {
         const { corner } = resizing;
@@ -789,9 +805,9 @@ export default function Canvas() {
         const amount = e.shiftKey ? NUDGE_AMOUNT_LARGE : NUDGE_AMOUNT;
         const updates: Partial<Panel> = {};
 
-        if (e.key === "ArrowUp") updates.y = Math.max(0, panel.y - amount);
+        if (e.key === "ArrowUp") updates.y = panel.y - amount;
         if (e.key === "ArrowDown") updates.y = panel.y + amount;
-        if (e.key === "ArrowLeft") updates.x = Math.max(0, panel.x - amount);
+        if (e.key === "ArrowLeft") updates.x = panel.x - amount;
         if (e.key === "ArrowRight") updates.x = panel.x + amount;
 
         updatePanel(selectedPanelId, updates);
@@ -1160,11 +1176,13 @@ export default function Canvas() {
     const x = panel.x;
     const y = panel.y;
 
-    // Get visible dimensions based on orientation
+    // Get visible dimensions based on orientation (enlarged for usability)
     const visible = getVisibleDimensions(panel, settings.thickness);
     const width = visible.width;
     const height = visible.height;
+    const actualHeight = visible.actualHeight; // True dimension
     const orientation = panel.orientation || "horizontal";
+    const isEnlarged = height > actualHeight; // Check if we enlarged it for display
 
     const handleSize = 12 / zoom;
     const patternId = `wood-${panel.id}`;
@@ -1311,22 +1329,46 @@ export default function Canvas() {
                 {panel.width} × {panel.height} mm
               </text>
             )}
+            {/* Show actual thickness for enlarged panels */}
+            {isEnlarged && (
+              <text
+                x={x + width / 2}
+                y={y + height - 6}
+                textAnchor="middle"
+                fontSize={9}
+                fill="#9333ea"
+                pointerEvents="none"
+              >
+                (actual: {actualHeight}mm)
+              </text>
+            )}
           </>
         ) : (
-          // Compact tooltip for thin panels (shelves, sides)
+          // Compact label for thin panels (shelves, sides) - now bigger so show label
           <>
             <title>
-              {panel.label}: {panel.width} × {panel.height} mm ({orientation})
+              {panel.label}: {panel.width} × {panel.height} mm ({orientation}) - Visual height enlarged for easier selection
             </title>
-            {/* Small indicator dot for thin panels */}
-            <circle
-              cx={x + width / 2}
-              cy={y + height / 2}
-              r={Math.min(10, Math.min(width, height) / 3)}
+            {/* Background for label */}
+            <rect
+              x={x + width / 2 - 60}
+              y={y + height / 2 - 10}
+              width={120}
+              height={20}
               fill="rgba(255,255,255,0.9)"
-              stroke={isSelected ? "#2563eb" : "#888"}
-              strokeWidth={1 / zoom}
+              rx={3}
             />
+            <text
+              x={x + width / 2}
+              y={y + height / 2 + 4}
+              textAnchor="middle"
+              fontSize={11}
+              fill="#1f2937"
+              pointerEvents="none"
+              fontWeight={500}
+            >
+              {panel.label} {isEnlarged && `(${actualHeight}mm)`}
+            </text>
           </>
         )}
 

@@ -107,11 +107,10 @@ export default function Sidebar() {
                 </label>
                 <input
                   type="number"
-                  min={0}
                   value={Math.round(selectedPanel.x)}
                   onChange={(e) =>
                     updatePanel(selectedPanel.id, {
-                      x: Math.max(0, parseInt(e.target.value) || 0),
+                      x: parseInt(e.target.value) || 0,
                     })
                   }
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
@@ -123,11 +122,10 @@ export default function Sidebar() {
                 </label>
                 <input
                   type="number"
-                  min={0}
                   value={Math.round(selectedPanel.y)}
                   onChange={(e) =>
                     updatePanel(selectedPanel.id, {
-                      y: Math.max(0, parseInt(e.target.value) || 0),
+                      y: parseInt(e.target.value) || 0,
                     })
                   }
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
