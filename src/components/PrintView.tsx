@@ -1,6 +1,7 @@
 import { Printer, X } from "lucide-react";
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
+import { generateAssemblySteps, getAssemblySummary } from "../lib/assembly";
 import { useDesignStore } from "../stores/designStore";
 import type { Panel } from "../types";
 import CutListTable from "./CutListTable";
@@ -151,6 +152,15 @@ export default function PrintView({ onClose }: PrintViewProps) {
     
     return { width: maxX - minX, height: maxY - minY, minX, maxX, minY, maxY };
   }, [panels, settings.thickness]);
+
+  // Generate assembly steps
+  const assemblySteps = useMemo(() => {
+    return generateAssemblySteps(panels, settings);
+  }, [panels, settings]);
+
+  const assemblySummary = useMemo(() => {
+    return getAssemblySummary(assemblySteps);
+  }, [assemblySteps]);
 
   const handlePrint = () => {
     window.print();
@@ -605,10 +615,86 @@ export default function PrintView({ onClose }: PrintViewProps) {
           })()}
         </section>
 
-        {/* Notes Section */}
+        {/* Assembly Steps */}
         <section className="mb-8">
           <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
             <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">4</span>
+            Assembly Instructions
+          </h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Estimated time: {assemblySummary.estimatedTime} • {assemblySummary.totalSteps} steps
+          </p>
+          <div className="space-y-3">
+            {assemblySteps.map((step) => {
+              const panel = panels.find(p => p.id === step.panelId);
+              const orientation = panel?.orientation || "horizontal";
+              
+              return (
+                <div key={step.stepNumber} className="flex gap-4 items-start p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  {/* Step number */}
+                  <div className="flex-shrink-0 w-8 h-8 bg-gray-900 text-white rounded-full flex items-center justify-center text-sm font-bold">
+                    {step.stepNumber}
+                  </div>
+                  
+                  {/* Mini panel diagram */}
+                  <div className="flex-shrink-0 w-12 flex items-center justify-center">
+                    <svg 
+                      width={orientation === "horizontal" ? 40 : 20} 
+                      height={orientation === "horizontal" ? 16 : 36} 
+                      viewBox={orientation === "horizontal" ? "0 0 40 16" : "0 0 20 36"}
+                    >
+                      {/* Simple 3D panel representation */}
+                      <polygon
+                        points={orientation === "horizontal" 
+                          ? "0,4 2,2 38,2 36,4" 
+                          : "0,4 2,2 18,2 16,4"}
+                        fill="#e8e8e8"
+                        stroke="#333"
+                        strokeWidth={0.5}
+                      />
+                      <polygon
+                        points={orientation === "horizontal" 
+                          ? "36,4 38,2 38,12 36,14" 
+                          : "16,4 18,2 18,32 16,34"}
+                        fill="#d8d8d8"
+                        stroke="#333"
+                        strokeWidth={0.5}
+                      />
+                      <rect
+                        x={0}
+                        y={4}
+                        width={orientation === "horizontal" ? 36 : 16}
+                        height={orientation === "horizontal" ? 10 : 30}
+                        fill="#f5f5f5"
+                        stroke="#333"
+                        strokeWidth={0.75}
+                      />
+                    </svg>
+                  </div>
+                  
+                  {/* Instruction text */}
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-900">{step.action}: {step.panelLabel}</div>
+                    <div className="text-sm text-gray-600 mt-0.5">{step.instruction}</div>
+                    {step.connectsTo.length > 0 && (
+                      <div className="text-xs text-gray-400 mt-1">
+                        Connects to: {step.connectsTo.map(id => {
+                          const p = panels.find(pp => pp.id === id);
+                          return p?.label || `Panel ${id.slice(0, 4)}`;
+                        }).join(", ")}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Notes Section */}
+        <section className="mb-8">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">5</span>
             Assembly Notes
           </h2>
           <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 min-h-[100px]">
@@ -624,7 +710,7 @@ export default function PrintView({ onClose }: PrintViewProps) {
         {/* Material Requirements */}
         <section className="page-break-inside-avoid">
           <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">5</span>
+            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">6</span>
             Material Summary
           </h2>
           <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
