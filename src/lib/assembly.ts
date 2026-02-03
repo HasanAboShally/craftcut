@@ -21,9 +21,11 @@ export interface AssemblyStep {
   stepNumber: number;
   panelId: string;
   panelLabel: string;
+  letterLabel: string; // A, B, C, etc.
   action: string;
   instruction: string;
   connectsTo: string[]; // Panel IDs this step connects to
+  connectsToLetters: string[]; // Letter labels of connected panels
   cumulativePanels: string[]; // All panels assembled so far including this one
 }
 
@@ -281,50 +283,48 @@ function getActionVerb(orientation: string): string {
 // Generate instruction text
 function generateInstructionText(
   panel: Panel,
-  connectsTo: Panel[],
+  letterLabel: string,
+  connectsToLetters: string[],
   isFirst: boolean,
   thickness: number
 ): string {
   const orientation = panel.orientation || "horizontal";
-  const label = panel.label || `Panel ${panel.id.slice(0, 4)}`;
   
   if (isFirst) {
     if (orientation === "horizontal") {
-      return `Place the ${label} on a flat, stable surface. This will serve as the foundation.`;
+      return `Place panel ${letterLabel} on a flat, stable surface. This will serve as the foundation.`;
     } else {
-      return `Start with the ${label}. Lay it flat on a stable surface.`;
+      return `Start with panel ${letterLabel}. Lay it flat on a stable surface.`;
     }
   }
   
-  if (connectsTo.length === 0) {
-    return `Position the ${label} according to the design.`;
+  if (connectsToLetters.length === 0) {
+    return `Position panel ${letterLabel} according to the design.`;
   }
   
-  const connectionNames = connectsTo.map(p => p.label || `Panel ${p.id.slice(0, 4)}`);
-  
   if (orientation === "vertical") {
-    if (connectionNames.length === 1) {
-      return `Attach the ${label} perpendicular to the ${connectionNames[0]}.`;
+    if (connectsToLetters.length === 1) {
+      return `Attach panel ${letterLabel} perpendicular to ${connectsToLetters[0]}.`;
     } else {
-      return `Attach the ${label} between the ${connectionNames.slice(0, -1).join(", ")} and ${connectionNames.slice(-1)}.`;
+      return `Attach panel ${letterLabel} between ${connectsToLetters.slice(0, -1).join(", ")} and ${connectsToLetters.slice(-1)}.`;
     }
   }
   
   if (orientation === "horizontal") {
-    if (connectionNames.length === 1) {
-      return `Rest the ${label} on top of the ${connectionNames[0]}.`;
-    } else if (connectionNames.length === 2) {
-      return `Insert the ${label} between the ${connectionNames[0]} and ${connectionNames[1]}.`;
+    if (connectsToLetters.length === 1) {
+      return `Rest panel ${letterLabel} on top of ${connectsToLetters[0]}.`;
+    } else if (connectsToLetters.length === 2) {
+      return `Insert panel ${letterLabel} between ${connectsToLetters[0]} and ${connectsToLetters[1]}.`;
     } else {
-      return `Position the ${label} connecting to ${connectionNames.join(", ")}.`;
+      return `Position panel ${letterLabel} connecting to ${connectsToLetters.join(", ")}.`;
     }
   }
   
   if (orientation === "back") {
-    return `Attach the ${label} to the back of the assembled frame to add rigidity.`;
+    return `Attach panel ${letterLabel} to the back of the assembled frame to add rigidity.`;
   }
   
-  return `Install the ${label}.`;
+  return `Install panel ${letterLabel}.`;
 }
 
 // Main function: Generate assembly steps
@@ -357,15 +357,23 @@ export function generateAssemblySteps(panels: Panel[], settings: Settings): Asse
     );
   }
   
-  // 5. Generate steps
+  // 5. Generate steps with letter labels
   const panelMap = new Map(panels.map(p => [p.id, p]));
   const assembledSoFar: string[] = [];
+  const idToLetter = new Map<string, string>();
+  
+  // Pre-assign letters based on assembly order
+  orderedIds.forEach((id, idx) => {
+    idToLetter.set(id, String.fromCharCode(65 + idx)); // 65 = 'A'
+  });
   
   return orderedIds.map((panelId, index) => {
     const panel = panelMap.get(panelId);
     if (!panel) {
       return null;
     }
+    
+    const letterLabel = idToLetter.get(panelId) || String.fromCharCode(65 + index);
     
     // Find which already-assembled panels this one connects to
     const connectsToIds = connections
@@ -375,9 +383,10 @@ export function generateAssemblySteps(panels: Panel[], settings: Settings): Asse
       )
       .map(c => c.panelA === panelId ? c.panelB : c.panelA);
     
-    const connectsToPanels = connectsToIds
-      .map(id => panelMap.get(id))
-      .filter((p): p is Panel => p !== undefined);
+    // Get letter labels for connected panels
+    const connectsToLetters = connectsToIds
+      .map(id => idToLetter.get(id))
+      .filter((l): l is string => l !== undefined);
     
     assembledSoFar.push(panelId);
     
@@ -387,9 +396,11 @@ export function generateAssemblySteps(panels: Panel[], settings: Settings): Asse
       stepNumber: index + 1,
       panelId,
       panelLabel: panel.label || `Panel ${panelId.slice(0, 4)}`,
+      letterLabel,
       action: getActionVerb(orientation),
-      instruction: generateInstructionText(panel, connectsToPanels, index === 0, settings.thickness),
+      instruction: generateInstructionText(panel, letterLabel, connectsToLetters, index === 0, settings.thickness),
       connectsTo: connectsToIds,
+      connectsToLetters,
       cumulativePanels: [...assembledSoFar],
     };
   }).filter((step): step is AssemblyStep => step !== null);

@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { generateAssemblySteps, getAssemblySummary } from "../lib/assembly";
 import { useDesignStore } from "../stores/designStore";
 import type { Panel } from "../types";
+import AssemblyIllustration from "./AssemblyIllustration";
 import CutListTable from "./CutListTable";
 import Print3DImage from "./Print3DImage";
 
@@ -624,71 +625,65 @@ export default function PrintView({ onClose }: PrintViewProps) {
           <p className="text-sm text-gray-500 mb-4">
             Estimated time: {assemblySummary.estimatedTime} • {assemblySummary.totalSteps} steps
           </p>
-          <div className="space-y-3">
-            {assemblySteps.map((step) => {
-              const panel = panels.find(p => p.id === step.panelId);
-              const orientation = panel?.orientation || "horizontal";
-              
-              return (
-                <div key={step.stepNumber} className="flex gap-4 items-start p-3 bg-gray-50 rounded-lg border border-gray-200">
-                  {/* Step number */}
-                  <div className="flex-shrink-0 w-8 h-8 bg-gray-900 text-white rounded-full flex items-center justify-center text-sm font-bold">
-                    {step.stepNumber}
-                  </div>
-                  
-                  {/* Mini panel diagram */}
-                  <div className="flex-shrink-0 w-12 flex items-center justify-center">
-                    <svg 
-                      width={orientation === "horizontal" ? 40 : 20} 
-                      height={orientation === "horizontal" ? 16 : 36} 
-                      viewBox={orientation === "horizontal" ? "0 0 40 16" : "0 0 20 36"}
-                    >
-                      {/* Simple 3D panel representation */}
-                      <polygon
-                        points={orientation === "horizontal" 
-                          ? "0,4 2,2 38,2 36,4" 
-                          : "0,4 2,2 18,2 16,4"}
-                        fill="#e8e8e8"
-                        stroke="#333"
-                        strokeWidth={0.5}
+          
+          {/* Build letter labels map for illustrations */}
+          {(() => {
+            const letterLabels = new Map<string, string>();
+            assemblySteps.forEach(step => {
+              letterLabels.set(step.panelId, step.letterLabel);
+            });
+            
+            return (
+              <div className="grid grid-cols-2 gap-6">
+                {assemblySteps.map((step) => (
+                  <div key={step.stepNumber} className="flex gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200 page-break-inside-avoid">
+                    {/* Left: Illustration */}
+                    <div className="flex-shrink-0">
+                      <AssemblyIllustration
+                        panels={panels}
+                        cumulativePanelIds={step.cumulativePanels}
+                        currentPanelId={step.panelId}
+                        letterLabels={letterLabels}
+                        settings={settings}
+                        size={140}
                       />
-                      <polygon
-                        points={orientation === "horizontal" 
-                          ? "36,4 38,2 38,12 36,14" 
-                          : "16,4 18,2 18,32 16,34"}
-                        fill="#d8d8d8"
-                        stroke="#333"
-                        strokeWidth={0.5}
-                      />
-                      <rect
-                        x={0}
-                        y={4}
-                        width={orientation === "horizontal" ? 36 : 16}
-                        height={orientation === "horizontal" ? 10 : 30}
-                        fill="#f5f5f5"
-                        stroke="#333"
-                        strokeWidth={0.75}
-                      />
-                    </svg>
-                  </div>
-                  
-                  {/* Instruction text */}
-                  <div className="flex-1">
-                    <div className="font-medium text-gray-900">{step.action}: {step.panelLabel}</div>
-                    <div className="text-sm text-gray-600 mt-0.5">{step.instruction}</div>
-                    {step.connectsTo.length > 0 && (
-                      <div className="text-xs text-gray-400 mt-1">
-                        Connects to: {step.connectsTo.map(id => {
-                          const p = panels.find(pp => pp.id === id);
-                          return p?.label || `Panel ${id.slice(0, 4)}`;
-                        }).join(", ")}
+                    </div>
+                    
+                    {/* Right: Step info */}
+                    <div className="flex-1 flex flex-col">
+                      {/* Step number and panel letter */}
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-7 h-7 bg-gray-900 text-white rounded-full flex items-center justify-center text-sm font-bold">
+                          {step.stepNumber}
+                        </span>
+                        <span className="text-lg font-bold text-gray-900">
+                          Panel {step.letterLabel}
+                        </span>
                       </div>
-                    )}
+                      
+                      {/* Action */}
+                      <div className="text-sm font-medium text-gray-700 mb-1">
+                        {step.action}
+                      </div>
+                      
+                      {/* Instruction */}
+                      <div className="text-sm text-gray-600 flex-1">
+                        {step.instruction}
+                      </div>
+                      
+                      {/* Connections */}
+                      {step.connectsToLetters.length > 0 && (
+                        <div className="text-xs text-gray-400 mt-2 flex items-center gap-1">
+                          <span>→</span>
+                          <span>{step.connectsToLetters.join(", ")}</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                ))}
+              </div>
+            );
+          })()}
         </section>
 
         {/* Notes Section */}
