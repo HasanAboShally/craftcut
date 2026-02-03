@@ -247,58 +247,44 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
   const { panels, settings } = useDesignStore();
 
   const thickness = settings.thickness || 18;
-  const furnitureDepth = 300; // mm
+  const furnitureDepth = settings.furnitureDepth || 400; // mm - now from settings
   const SCALE = 0.01; // Convert mm to scene units
 
   // Convert 2D panels to 3D positions and sizes
   const { panels3D, center, maxDimension } = useMemo(() => {
     if (panels.length === 0) return { panels3D: [], center: [0, 0, 0] as [number, number, number], maxDimension: 1 };
 
-    // In 2D: internal Y increases downward (screen coords)
-    // In 3D: Y increases upward (real world)
-    // The visual display inverts Y, but internally panel.y is still screen coords
-    
-    // This must match the MIN_VISUAL_HEIGHT in Canvas.tsx
-    const MIN_VISUAL_HEIGHT_2D = 80;
-
-    // Get the VISUAL height as used in 2D canvas (with enlargement)
-    const getVisualHeight = (p: (typeof panels)[0]) => {
-      const orient = p.orientation || "horizontal";
-      if (orient === "horizontal") return Math.max(MIN_VISUAL_HEIGHT_2D, thickness);
-      return Math.max(MIN_VISUAL_HEIGHT_2D, p.height);
-    };
+    // Both 2D and 3D use Y-UP (positive Y goes up)
+    // 2D now shows TRUE dimensions (no visual enlargement)
+    // This makes conversion straightforward!
 
     // Get the TRUE visible dimensions (actual physical size)
-    const getTrueVisibleHeight = (p: (typeof panels)[0]) => {
+    const getTrueHeight = (p: (typeof panels)[0]) => {
       const orient = p.orientation || "horizontal";
       if (orient === "horizontal") return thickness;
       return p.height;
     };
 
-    const getTrueVisibleWidth = (p: (typeof panels)[0]) => {
+    const getTrueWidth = (p: (typeof panels)[0]) => {
       const orient = p.orientation || "horizontal";
       if (orient === "vertical") return thickness;
       return p.width;
     };
 
-    // Calculate bounds in 2D internal coordinates
+    // Calculate bounds using TRUE dimensions
     const minX = Math.min(...panels.map((p) => p.x));
-    const maxX = Math.max(...panels.map((p) => p.x + getTrueVisibleWidth(p)));
-    
-    // For Y, we need to consider VISUAL positions since that's how users aligned them
-    // The VISUAL bottom edge of each panel is at: panel.y + getVisualHeight(panel)
-    // We use the visual bottom as the reference for alignment
-    const minVisualY = Math.min(...panels.map((p) => p.y));
-    const maxVisualY = Math.max(...panels.map((p) => p.y + getVisualHeight(p)));
-    const totalVisualHeight = maxVisualY - minVisualY;
+    const maxX = Math.max(...panels.map((p) => p.x + getTrueWidth(p)));
+    const minY = Math.min(...panels.map((p) => p.y));
+    const maxY = Math.max(...panels.map((p) => p.y + getTrueHeight(p)));
+    const totalHeight = maxY - minY;
     
     // Calculate center in 3D space
     const widthInUnits = (maxX - minX) * SCALE;
-    const heightInUnits = totalVisualHeight * SCALE;
+    const heightInUnits = totalHeight * SCALE;
     const depthInUnits = furnitureDepth * SCALE;
     
     const centerX = 0;
-    const centerY = heightInUnits / 2;
+    const centerY = (minY + totalHeight / 2) * SCALE;
     const centerZ = 0;
     
     const maxDim = Math.max(widthInUnits, heightInUnits, depthInUnits);
@@ -309,58 +295,56 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
       const panelW = panel.width * SCALE;
       const panelH = panel.height * SCALE;
       const panelT = thickness * SCALE;
-      const depth = furnitureDepth * SCALE;
+      const fullDepth = furnitureDepth * SCALE;
+      
+      // Use panel's custom depth if set, otherwise use furniture depth
+      const panelDepth = (panel.depth || furnitureDepth) * SCALE;
+      const zAlign = panel.zAlign || "front";
 
       // X position: center the design around 0
       const totalWidth = maxX - minX;
       const x3d = ((panel.x - minX) - totalWidth / 2) * SCALE;
 
-      // Y position: In 2D, panels are positioned by their VISUAL top-left corner.
-      // The VISUAL bottom of a panel is at: panel.y + visualHeight
-      // In 3D, Y=0 is the floor, Y increases upward.
-      // We want the VISUAL bottoms to align, and then convert to 3D.
-      // 
-      // VISUAL bottom in 2D = panel.y + visualHeight
-      // TRUE bottom (what we show in 3D) should be at same relative position
-      // 
-      // In 2D coords: maxVisualY is the floor (lowest point visually on screen = highest Y value)
-      // In 3D: this becomes Y=0
-      // 
-      // For a panel:
-      //   - Its visual bottom is at panel.y + visualHeight (in 2D internal coords)
-      //   - Distance from floor (maxVisualY) to visual bottom = maxVisualY - (panel.y + visualHeight)
-      //   - In 3D, this becomes the Y position of the true bottom
+      // Y position: panel.y is the TRUE BOTTOM of the panel in world coords
+      // Both 2D and 3D use Y-up with TRUE dimensions
+      // So the 3D center should be at panel.y + trueHeight/2
+      const trueHeight = getTrueHeight(panel);
+      const y3d = (panel.y + trueHeight / 2) * SCALE;
       
-      const visualHeight = getVisualHeight(panel);
-      const trueHeight = getTrueVisibleHeight(panel);
-      const trueWidth = getTrueVisibleWidth(panel);
-      
-      // Visual bottom in 2D internal coords
-      const visualBottom2D = panel.y + visualHeight;
-      
-      // Distance from floor (maxVisualY) to visual bottom - this becomes Y position in 3D
-      const distanceFromFloor = maxVisualY - visualBottom2D;
-      
-      // In 3D, the bottom of the TRUE box should be at distanceFromFloor
-      // The center of the box is at distanceFromFloor + trueHeight/2
-      const y3d = distanceFromFloor * SCALE + (trueHeight * SCALE) / 2;
+      // Calculate Z position based on alignment
+      // Z=0 is the front, positive Z goes to the back
+      // Center of panel should be positioned based on alignment
+      const getZPosition = (depth: number) => {
+        switch (zAlign) {
+          case "front":
+            return -fullDepth / 2 + depth / 2; // Front-aligned
+          case "back":
+            return fullDepth / 2 - depth / 2; // Back-aligned
+          case "center":
+            return 0; // Centered
+          default:
+            return -fullDepth / 2 + depth / 2;
+        }
+      };
 
       switch (orientation) {
         case "horizontal": {
           // Shelf: horizontal panel - thickness tall in 3D Y
+          const zPos = getZPosition(panelDepth);
           return {
             id: panel.id,
-            position: [x3d + panelW / 2, y3d, 0] as [number, number, number],
-            size: [panelW, panelT, depth] as [number, number, number],
+            position: [x3d + panelW / 2, y3d, zPos] as [number, number, number],
+            size: [panelW, panelT, panelDepth] as [number, number, number],
           };
         }
 
         case "vertical": {
           // Side panel: vertical orientation - panel.height tall in 3D Y
+          const zPos = getZPosition(panelDepth);
           return {
             id: panel.id,
-            position: [x3d + panelT / 2, y3d, 0] as [number, number, number],
-            size: [panelT, panelH, depth] as [number, number, number],
+            position: [x3d + panelT / 2, y3d, zPos] as [number, number, number],
+            size: [panelT, panelH, panelDepth] as [number, number, number],
           };
         }
 
@@ -368,7 +352,7 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
           // Back panel: at the back - panel.height tall in 3D Y
           return {
             id: panel.id,
-            position: [x3d + panelW / 2, y3d, depth / 2 - panelT / 2] as [
+            position: [x3d + panelW / 2, y3d, fullDepth / 2 - panelT / 2] as [
               number,
               number,
               number,
@@ -381,7 +365,7 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
           return {
             id: panel.id,
             position: [x3d + panelW / 2, y3d, 0] as [number, number, number],
-            size: [panelW, panelT, depth] as [number, number, number],
+            size: [panelW, panelT, panelDepth] as [number, number, number],
           };
         }
       }

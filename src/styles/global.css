@@ -1,1 +1,91 @@
 @import "tailwindcss";
+
+/* Print styles */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  html, body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+
+  /* When print view is open, hide everything except the print view */
+  body.print-view-open > *:not(.print-view-container) {
+    display: none !important;
+  }
+
+  /* Print view container styles for print */
+  .print-view-container {
+    position: static !important;
+    overflow: visible !important;
+    height: auto !important;
+    z-index: auto !important;
+  }
+
+  /* Hide screen-only elements */
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .print-content {
+    padding: 0 !important;
+    max-width: none !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+
+  .cover-page {
+    height: 100vh !important;
+    min-height: unset !important;
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .page-break {
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-before: auto;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: block !important;
+    visibility: hidden;
+  }
+
+  .page-break-inside-avoid {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* Hide screen-only elements */
+  .print\\:hidden {
+    display: none !important;
+  }
+
+  /* Ensure images print well */
+  img {
+    max-width: 100% !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Avoid breaks inside sections */
+  section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}
+
+/* Screen-only: make page-break invisible */
+@media screen {
+  .page-break {
+    display: none;
+  }
+}

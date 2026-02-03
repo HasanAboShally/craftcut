@@ -1,30 +1,51 @@
-import { Hand, Maximize, MousePointer2, Ruler, ZoomIn, ZoomOut } from "lucide-react";
+import { Hand, Maximize, MousePointer2, Move, Printer, Redo2, Ruler, StickyNote, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDesignStore } from "../stores/designStore";
-import type { Panel } from "../types";
+import type { Panel, StickyNote as StickyNoteType } from "../types";
+import PrintView from "./PrintView";
+
+// =============================================================================
+// COORDINATE SYSTEM: Y-UP (like real-world furniture)
+// =============================================================================
+// - World coords: Y=0 is floor, positive Y goes UP
+// - Panel.y stores the BOTTOM edge of the panel (lowest Y value)
+// - Panel.x stores the LEFT edge of the panel
+// - Screen coords (SVG): Y=0 is top, positive Y goes DOWN
+// - Conversion: screenY = -worldY (simple negation)
+// =============================================================================
 
 const GRID_SIZE = 20;
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.1;
-const DEFAULT_ZOOM = 0.3;
+const DEFAULT_ZOOM = 0.5; // Higher default zoom so thin panels are visible
 const NUDGE_AMOUNT = 10;
 const NUDGE_AMOUNT_LARGE = 50;
-const SNAP_THRESHOLD = 15; // pixels for snapping
-const RULER_SIZE = 24; // pixels for ruler width/height
+const SNAP_THRESHOLD = 15;
+const RULER_SIZE = 24;
+const MIN_HIT_AREA = 40; // Minimum clickable area for thin panels
 
-// Helper to generate wood color variants from a base color
+const GUIDE_COLOR = "#f43f5e";
+const DISTANCE_COLOR = "#3b82f6";
+
+// =============================================================================
+// COORDINATE CONVERSION
+// =============================================================================
+
+const worldToScreenY = (worldY: number): number => -worldY;
+const screenToWorldY = (screenY: number): number => -screenY;
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
 function getWoodColorVariants(baseColor: string) {
-  // Convert hex to RGB, then darken for grain and dark variants
   const hex = baseColor.replace("#", "");
   const r = parseInt(hex.substring(0, 2), 16);
   const g = parseInt(hex.substring(2, 4), 16);
   const b = parseInt(hex.substring(4, 6), 16);
-
-  const darken = (val: number, amount: number) =>
-    Math.max(0, Math.floor(val * (1 - amount)));
+  const darken = (val: number, amount: number) => Math.max(0, Math.floor(val * (1 - amount)));
   const toHex = (val: number) => val.toString(16).padStart(2, "0");
-
   return {
     base: baseColor,
     grain: `#${toHex(darken(r, 0.1))}${toHex(darken(g, 0.1))}${toHex(darken(b, 0.1))}`,
@@ -32,1742 +53,1640 @@ function getWoodColorVariants(baseColor: string) {
   };
 }
 
-// Guide line colors
-const GUIDE_COLOR = "#f43f5e"; // Rose/red for alignment guides
-const DISTANCE_COLOR = "#3b82f6"; // Blue for distance indicators
-const MIN_VISUAL_HEIGHT = 80; // Minimum visual height in 2D for easier grabbing
-
-// Get TRUE visible dimensions of panel in front view based on orientation
-// Returns { width, height } as seen from the front - used for calculations and 3D
-function getTrueVisibleDimensions(
-  panel: Panel,
-  thickness: number,
-): { width: number; height: number } {
+function getTrueDimensions(panel: Panel, thickness: number): { width: number; height: number } {
   const orientation = panel.orientation || "horizontal";
-
   switch (orientation) {
-    case "horizontal":
-      // Shelf: you see the front edge - panel.width wide, thickness tall
-      return { width: panel.width, height: thickness };
-    case "vertical":
-      // Side/divider: you see the front edge - thickness wide, panel.height tall
-      return { width: thickness, height: panel.height };
-    case "back":
-      // Back panel: you see the face - panel.width × panel.height
-      return { width: panel.width, height: panel.height };
-    default:
-      return { width: panel.width, height: panel.height };
+    case "horizontal": return { width: panel.width, height: thickness };
+    case "vertical": return { width: thickness, height: panel.height };
+    case "back": return { width: panel.width, height: panel.height };
+    default: return { width: panel.width, height: panel.height };
   }
 }
 
-// Get visible dimensions for 2D canvas display with minimum size for usability
-// This makes thin panels (like horizontal shelves) easier to click and drag
-function getVisibleDimensions(
-  panel: Panel,
-  thickness: number,
-): { width: number; height: number; actualHeight: number } {
-  const trueDims = getTrueVisibleDimensions(panel, thickness);
+// Get expanded hit area for easier clicking on thin panels
+function getHitArea(panel: Panel, thickness: number): { width: number; height: number; offsetX: number; offsetY: number } {
+  const trueDims = getTrueDimensions(panel, thickness);
+  const hitWidth = Math.max(MIN_HIT_AREA, trueDims.width);
+  const hitHeight = Math.max(MIN_HIT_AREA, trueDims.height);
   return {
-    width: Math.max(MIN_VISUAL_HEIGHT, trueDims.width),
-    height: Math.max(MIN_VISUAL_HEIGHT, trueDims.height),
-    actualHeight: trueDims.height, // Keep track of actual for display
+    width: hitWidth,
+    height: hitHeight,
+    // Center the hit area on the true panel
+    offsetX: (hitWidth - trueDims.width) / 2,
+    offsetY: (hitHeight - trueDims.height) / 2,
   };
 }
 
-// Snap guide types
+// =============================================================================
+// TYPES
+// =============================================================================
+
 interface SnapGuide {
   type: "vertical" | "horizontal";
   position: number;
   start: number;
   end: number;
-  label?: string;
+  isEqualSpacing?: boolean;
+  gapSize?: number;
 }
 
-interface DistanceIndicator {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  distance: number;
-  orientation: "horizontal" | "vertical";
-}
+// =============================================================================
+// COMPONENT
+// =============================================================================
 
 export default function Canvas() {
-  const {
-    panels,
-    selectedPanelId,
-    selectPanel,
-    updatePanel,
-    deletePanel,
-    settings,
-  } = useDesignStore();
+  const { panels, selectedPanelIds, selectPanel, selectPanels, selectAll, clearSelection, updatePanel, deletePanel, deletePanels, settings, undo, redo, saveToHistory, canUndo, canRedo, stickyNotes, addStickyNote, updateStickyNote, deleteStickyNote, viewState, updateViewState } = useDesignStore();
+  
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hasAutoCentered = useRef(false);
+  
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
   const [dragging, setDragging] = useState<string | null>(null);
-  const [resizing, setResizing] = useState<{
-    id: string;
-    corner: string;
-  } | null>(null);
+  const [draggingMultiple, setDraggingMultiple] = useState(false);
+  const [dragStartPositions, setDragStartPositions] = useState<Map<string, { x: number; y: number }>>(new Map());
+  const [resizing, setResizing] = useState<{ id: string; corner: string } | null>(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [panelStart, setPanelStart] = useState({
-    x: 0,
-    y: 0,
-    width: 0,
-    height: 0,
-  });
-  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [panelStart, setPanelStart] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  
+  // Use viewState from store for zoom/pan persistence
+  const [zoom, setZoomLocal] = useState(viewState.zoom);
+  const [pan, setPanLocal] = useState({ x: viewState.panX, y: viewState.panY });
+  
+  // Sync local state changes back to store
+  const setZoom = useCallback((newZoom: number | ((prev: number) => number)) => {
+    setZoomLocal(prev => {
+      const value = typeof newZoom === 'function' ? newZoom(prev) : newZoom;
+      updateViewState({ zoom: value });
+      return value;
+    });
+  }, [updateViewState]);
+  
+  const setPan = useCallback((newPan: { x: number; y: number } | ((prev: { x: number; y: number }) => { x: number; y: number })) => {
+    setPanLocal(prev => {
+      const value = typeof newPan === 'function' ? newPan(prev) : newPan;
+      updateViewState({ panX: value.x, panY: value.y });
+      return value;
+    });
+  }, [updateViewState]);
+  
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [spaceHeld, setSpaceHeld] = useState(false);
-  const [clipboard, setClipboard] = useState<Panel | null>(null);
+  const [shiftHeld, setShiftHeld] = useState(false);
+  const [altHeld, setAltHeld] = useState(false);
+  const [ctrlHeld, setCtrlHeld] = useState(false);
+  const [clipboard, setClipboard] = useState<Panel[]>([]);
   const [tool, setTool] = useState<"select" | "pan">("select");
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
-  const [distanceIndicators, setDistanceIndicators] = useState<
-    DistanceIndicator[]
-  >([]);
   const [showRulers, setShowRulers] = useState(true);
+  const [showMeasurements, setShowMeasurements] = useState(false);
+  const [editingMeasurement, setEditingMeasurement] = useState<{
+    type: "gap" | "position";
+    panelId: string;
+    axis: "x" | "y";
+    direction: "before" | "after" | "floor";
+    currentValue: number;
+    position: { x: number; y: number };
+  } | null>(null);
+  const [measurementInputValue, setMeasurementInputValue] = useState("");
+  const [dragAxis, setDragAxis] = useState<"free" | "horizontal" | "vertical">("free");
+  const [hasDuplicatedOnDrag, setHasDuplicatedOnDrag] = useState(false);
+  
+  // Marquee selection
+  const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
+  const [marqueeStart, setMarqueeStart] = useState({ x: 0, y: 0 });
+  const [marqueeEnd, setMarqueeEnd] = useState({ x: 0, y: 0 });
+  
+  // Sticky notes
+  const [stickyNoteTool, setStickyNoteTool] = useState(false);
+  const [draggingNote, setDraggingNote] = useState<string | null>(null);
+  const [noteStart, setNoteStart] = useState({ x: 0, y: 0 });
+  const [editingNote, setEditingNote] = useState<string | null>(null);
+  const [noteInputValue, setNoteInputValue] = useState("");
+  
+  // Print view
+  const [showPrintView, setShowPrintView] = useState(false);
 
-  // Calculate gaps between selected panel and adjacent panels (use TRUE dimensions for accuracy)
+  // ViewBox in screen coordinates
+  const viewBoxWidth = canvasSize.width / zoom;
+  const viewBoxHeight = canvasSize.height / zoom;
+  const viewBoxX = -pan.x / zoom - viewBoxWidth / 2;
+  const viewBoxY = -pan.y / zoom - viewBoxHeight / 2;
+  
+  // For backward compatibility - get first selected panel
+  const selectedPanelId = selectedPanelIds.length === 1 ? selectedPanelIds[0] : null;
+
+  // ===========================================================================
+  // GAP CALCULATIONS
+  // ===========================================================================
+  
   const calculateGaps = useMemo(() => {
     if (!selectedPanelId) return null;
-    
     const selectedPanel = panels.find(p => p.id === selectedPanelId);
     if (!selectedPanel) return null;
+    const visible = getTrueDimensions(selectedPanel, settings.thickness);
+    return { panel: selectedPanel, visible };
+  }, [selectedPanelId, panels, settings.thickness]);
+
+  // ===========================================================================
+  // SNAPPING
+  // ===========================================================================
+  
+  const getSnapPoints = useCallback((excludeIds: string[]) => {
+    const points: { x: number[]; y: number[] } = { x: [], y: [] };
+    const panelEdges: { id: string; left: number; right: number; bottom: number; top: number; width: number; height: number }[] = [];
     
-    const selectedVisible = getTrueVisibleDimensions(selectedPanel, settings.thickness);
-    const selectedLeft = selectedPanel.x;
-    const selectedRight = selectedPanel.x + selectedVisible.width;
-    const selectedTop = selectedPanel.y;
-    const selectedBottom = selectedPanel.y + selectedVisible.height;
+    panels.forEach((p) => {
+      if (excludeIds.includes(p.id)) return;
+      const trueDims = getTrueDimensions(p, settings.thickness);
+      const left = p.x;
+      const right = p.x + trueDims.width;
+      const bottom = p.y;
+      const top = p.y + trueDims.height;
+      
+      // Basic snap points: edges and centers
+      points.x.push(left, left + trueDims.width / 2, right);
+      points.y.push(bottom, bottom + trueDims.height / 2, top);
+      
+      panelEdges.push({ id: p.id, left, right, bottom, top, width: trueDims.width, height: trueDims.height });
+    });
+    points.y.push(0); // Floor
     
-    // Find closest panels in each direction
-    let gapAbove: { distance: number; panelLabel: string } | null = null;
-    let gapBelow: { distance: number; panelLabel: string } | null = null;
-    let gapLeft: { distance: number; panelLabel: string } | null = null;
-    let gapRight: { distance: number; panelLabel: string } | null = null;
+    return { points, panelEdges };
+  }, [panels, settings.thickness]);
+
+  // Find equal spacing positions between panels
+  const findEqualSpacingSnaps = useCallback((
+    excludeIds: string[],
+    panelWidth: number,
+    panelHeight: number,
+    rawX: number,
+    rawY: number
+  ) => {
+    const { panelEdges } = getSnapPoints(excludeIds);
+    const snaps: { axis: "x" | "y"; position: number; gap: number; guides: SnapGuide[] }[] = [];
     
-    for (const panel of panels) {
-      if (panel.id === selectedPanelId) continue;
+    // For X-axis: find panels that are horizontally aligned (overlapping in Y)
+    // and calculate equal spacing positions
+    const panelBottom = rawY;
+    const panelTop = rawY + panelHeight;
+    
+    // Get panels that overlap vertically with the dragged panel
+    const horizontalNeighbors = panelEdges
+      .filter(p => p.top > panelBottom && p.bottom < panelTop)
+      .sort((a, b) => a.left - b.left);
+    
+    // Find gaps between consecutive panels and snap to equal spacing
+    for (let i = 0; i < horizontalNeighbors.length - 1; i++) {
+      const leftPanel = horizontalNeighbors[i];
+      const rightPanel = horizontalNeighbors[i + 1];
+      const gapStart = leftPanel.right;
+      const gapEnd = rightPanel.left;
+      const gapWidth = gapEnd - gapStart;
       
-      const visible = getTrueVisibleDimensions(panel, settings.thickness);
-      const left = panel.x;
-      const right = panel.x + visible.width;
-      const top = panel.y;
-      const bottom = panel.y + visible.height;
-      
-      // Check horizontal overlap for vertical gaps
-      const hasHorizontalOverlap = 
-        Math.max(selectedLeft, left) < Math.min(selectedRight, right);
-      
-      // Check vertical overlap for horizontal gaps  
-      const hasVerticalOverlap = 
-        Math.max(selectedTop, top) < Math.min(selectedBottom, bottom);
-      
-      if (hasHorizontalOverlap) {
-        // Panel above (its bottom is above our top)
-        if (bottom <= selectedTop) {
-          const distance = selectedTop - bottom;
-          if (!gapAbove || distance < gapAbove.distance) {
-            gapAbove = { distance, panelLabel: panel.label };
-          }
-        }
-        // Panel below (its top is below our bottom)
-        if (top >= selectedBottom) {
-          const distance = top - selectedBottom;
-          if (!gapBelow || distance < gapBelow.distance) {
-            gapBelow = { distance, panelLabel: panel.label };
-          }
-        }
-      }
-      
-      if (hasVerticalOverlap) {
-        // Panel to the left (its right is left of our left)
-        if (right <= selectedLeft) {
-          const distance = selectedLeft - right;
-          if (!gapLeft || distance < gapLeft.distance) {
-            gapLeft = { distance, panelLabel: panel.label };
-          }
-        }
-        // Panel to the right (its left is right of our right)
-        if (left >= selectedRight) {
-          const distance = left - selectedRight;
-          if (!gapRight || distance < gapRight.distance) {
-            gapRight = { distance, panelLabel: panel.label };
-          }
+      // Only consider gaps large enough to fit the panel plus some margin
+      if (gapWidth >= panelWidth) {
+        // Snap to center of gap (equal spacing)
+        const centerX = gapStart + (gapWidth - panelWidth) / 2;
+        const leftGap = centerX - gapStart;
+        const rightGap = gapEnd - (centerX + panelWidth);
+        
+        if (Math.abs(leftGap - rightGap) < 1) { // Truly centered
+          snaps.push({
+            axis: "x",
+            position: centerX,
+            gap: leftGap,
+            guides: [
+              { type: "vertical", position: gapStart, start: -2000, end: 2000, isEqualSpacing: true, gapSize: leftGap },
+              { type: "vertical", position: centerX, start: -2000, end: 2000, isEqualSpacing: true, gapSize: leftGap },
+              { type: "vertical", position: centerX + panelWidth, start: -2000, end: 2000, isEqualSpacing: true, gapSize: rightGap },
+              { type: "vertical", position: gapEnd, start: -2000, end: 2000, isEqualSpacing: true, gapSize: rightGap },
+            ]
+          });
         }
       }
     }
     
-    return {
-      panel: selectedPanel,
-      visible: selectedVisible,
-      gapAbove,
-      gapBelow,
-      gapLeft,
-      gapRight,
+    // For Y-axis: find panels that are vertically aligned (overlapping in X)
+    const panelLeft = rawX;
+    const panelRight = rawX + panelWidth;
+    
+    const verticalNeighbors = panelEdges
+      .filter(p => p.right > panelLeft && p.left < panelRight)
+      .sort((a, b) => a.bottom - b.bottom);
+    
+    for (let i = 0; i < verticalNeighbors.length - 1; i++) {
+      const bottomPanel = verticalNeighbors[i];
+      const topPanel = verticalNeighbors[i + 1];
+      const gapStart = bottomPanel.top;
+      const gapEnd = topPanel.bottom;
+      const gapHeight = gapEnd - gapStart;
+      
+      if (gapHeight >= panelHeight) {
+        const centerY = gapStart + (gapHeight - panelHeight) / 2;
+        const bottomGap = centerY - gapStart;
+        const topGap = gapEnd - (centerY + panelHeight);
+        
+        if (Math.abs(bottomGap - topGap) < 1) {
+          snaps.push({
+            axis: "y",
+            position: centerY,
+            gap: bottomGap,
+            guides: [
+              { type: "horizontal", position: gapStart, start: -2000, end: 2000, isEqualSpacing: true, gapSize: bottomGap },
+              { type: "horizontal", position: centerY, start: -2000, end: 2000, isEqualSpacing: true, gapSize: bottomGap },
+              { type: "horizontal", position: centerY + panelHeight, start: -2000, end: 2000, isEqualSpacing: true, gapSize: topGap },
+              { type: "horizontal", position: gapEnd, start: -2000, end: 2000, isEqualSpacing: true, gapSize: topGap },
+            ]
+          });
+        }
+      }
+    }
+    
+    // Also find positions that match existing gaps (distribute evenly)
+    // Look for repeated gap patterns
+    const xGaps: number[] = [];
+    for (let i = 0; i < horizontalNeighbors.length - 1; i++) {
+      xGaps.push(horizontalNeighbors[i + 1].left - horizontalNeighbors[i].right);
+    }
+    
+    // If there's a consistent gap size, snap to positions that maintain it
+    if (xGaps.length > 0) {
+      const commonGap = xGaps[0]; // Use the first gap as reference
+      
+      // Snap positions that would create the same gap on either side
+      for (const panel of horizontalNeighbors) {
+        // Position to create same gap to the right of this panel
+        const snapRight = panel.right + commonGap;
+        if (Math.abs(rawX - snapRight) < SNAP_THRESHOLD / zoom) {
+          snaps.push({
+            axis: "x",
+            position: snapRight,
+            gap: commonGap,
+            guides: [{ type: "vertical", position: snapRight, start: -2000, end: 2000, isEqualSpacing: true, gapSize: commonGap }]
+          });
+        }
+        // Position to create same gap to the left of this panel
+        const snapLeft = panel.left - panelWidth - commonGap;
+        if (Math.abs(rawX - snapLeft) < SNAP_THRESHOLD / zoom) {
+          snaps.push({
+            axis: "x",
+            position: snapLeft,
+            gap: commonGap,
+            guides: [{ type: "vertical", position: snapLeft + panelWidth, start: -2000, end: 2000, isEqualSpacing: true, gapSize: commonGap }]
+          });
+        }
+      }
+    }
+    
+    const yGaps: number[] = [];
+    for (let i = 0; i < verticalNeighbors.length - 1; i++) {
+      yGaps.push(verticalNeighbors[i + 1].bottom - verticalNeighbors[i].top);
+    }
+    
+    if (yGaps.length > 0) {
+      const commonGap = yGaps[0];
+      
+      for (const panel of verticalNeighbors) {
+        const snapAbove = panel.top + commonGap;
+        if (Math.abs(rawY - snapAbove) < SNAP_THRESHOLD / zoom) {
+          snaps.push({
+            axis: "y",
+            position: snapAbove,
+            gap: commonGap,
+            guides: [{ type: "horizontal", position: snapAbove, start: -2000, end: 2000, isEqualSpacing: true, gapSize: commonGap }]
+          });
+        }
+        const snapBelow = panel.bottom - panelHeight - commonGap;
+        if (Math.abs(rawY - snapBelow) < SNAP_THRESHOLD / zoom) {
+          snaps.push({
+            axis: "y",
+            position: snapBelow,
+            gap: commonGap,
+            guides: [{ type: "horizontal", position: snapBelow + panelHeight, start: -2000, end: 2000, isEqualSpacing: true, gapSize: commonGap }]
+          });
+        }
+      }
+    }
+    
+    return snaps;
+  }, [getSnapPoints, zoom]);
+
+  const findSnapPosition = useCallback((excludeIds: string[], rawX: number, rawY: number, panelWidth: number, panelHeight: number) => {
+    const { points: snapPoints } = getSnapPoints(excludeIds);
+    const guides: SnapGuide[] = [];
+    let snappedX = rawX, snappedY = rawY;
+
+    const edges = {
+      left: rawX, centerX: rawX + panelWidth / 2, right: rawX + panelWidth,
+      bottom: rawY, centerY: rawY + panelHeight / 2, top: rawY + panelHeight,
     };
-  }, [selectedPanelId, panels, settings.thickness]);
 
-  // Get all snap points from other panels (use TRUE dimensions for accuracy)
-  const getSnapPoints = useCallback(
-    (excludeId: string) => {
-      const points: { x: number[]; y: number[] } = { x: [], y: [] };
-      const panelBounds: {
-        left: number;
-        right: number;
-        top: number;
-        bottom: number;
-        cx: number;
-        cy: number;
-      }[] = [];
-
-      panels.forEach((p) => {
-        if (p.id === excludeId) return;
-        const visible = getTrueVisibleDimensions(p, settings.thickness);
-
-        const left = p.x;
-        const right = p.x + visible.width;
-        const top = p.y;
-        const bottom = p.y + visible.height;
-        const cx = p.x + visible.width / 2;
-        const cy = p.y + visible.height / 2;
-
-        panelBounds.push({ left, right, top, bottom, cx, cy });
-
-        // Left, center, right edges
-        points.x.push(left);
-        points.x.push(cx);
-        points.x.push(right);
-
-        // Top, center, bottom edges
-        points.y.push(top);
-        points.y.push(cy);
-        points.y.push(bottom);
+    let minXDiff = SNAP_THRESHOLD / zoom;
+    (["left", "centerX", "right"] as const).forEach((edge) => {
+      snapPoints.x.forEach((snapX) => {
+        const diff = Math.abs(edges[edge] - snapX);
+        if (diff < minXDiff) {
+          minXDiff = diff;
+          snappedX = edge === "left" ? snapX : edge === "centerX" ? snapX - panelWidth / 2 : snapX - panelWidth;
+          guides.push({ type: "vertical", position: snapX, start: -2000, end: 2000 });
+        }
       });
+    });
 
-      // Add equal spacing points (midpoints between adjacent panels)
-      // Sort panels by position to find neighbors
-      const sortedByX = [...panelBounds].sort((a, b) => a.left - b.left);
-      const sortedByY = [...panelBounds].sort((a, b) => a.top - b.top);
-
-      // X midpoints between horizontally adjacent panels
-      for (let i = 0; i < sortedByX.length - 1; i++) {
-        const gap = sortedByX[i + 1].left - sortedByX[i].right;
-        if (gap > 0 && gap < 500) {
-          // Midpoint of the gap
-          points.x.push(sortedByX[i].right + gap / 2);
+    let minYDiff = SNAP_THRESHOLD / zoom;
+    (["bottom", "centerY", "top"] as const).forEach((edge) => {
+      snapPoints.y.forEach((snapY) => {
+        const diff = Math.abs(edges[edge] - snapY);
+        if (diff < minYDiff) {
+          minYDiff = diff;
+          snappedY = edge === "bottom" ? snapY : edge === "centerY" ? snapY - panelHeight / 2 : snapY - panelHeight;
+          guides.push({ type: "horizontal", position: snapY, start: -2000, end: 2000 });
+        }
+      });
+    });
+    
+    // Check equal spacing snaps - these take priority when close
+    const equalSnaps = findEqualSpacingSnaps(excludeIds, panelWidth, panelHeight, rawX, rawY);
+    for (const snap of equalSnaps) {
+      if (snap.axis === "x") {
+        const diff = Math.abs(rawX - snap.position);
+        if (diff < SNAP_THRESHOLD / zoom && diff < minXDiff + 5) {
+          snappedX = snap.position;
+          guides.push(...snap.guides);
+        }
+      } else {
+        const diff = Math.abs(rawY - snap.position);
+        if (diff < SNAP_THRESHOLD / zoom && diff < minYDiff + 5) {
+          snappedY = snap.position;
+          guides.push(...snap.guides);
         }
       }
+    }
 
-      // Y midpoints between vertically adjacent panels
-      for (let i = 0; i < sortedByY.length - 1; i++) {
-        const gap = sortedByY[i + 1].top - sortedByY[i].bottom;
-        if (gap > 0 && gap < 500) {
-          // Midpoint of the gap
-          points.y.push(sortedByY[i].bottom + gap / 2);
-        }
-      }
+    return { x: snappedX, y: snappedY, guides };
+  }, [getSnapPoints, findEqualSpacingSnaps, zoom]);
 
-      return points;
-    },
-    [panels, settings.thickness],
-  );
-
-  // Find snap position and generate guides
-  const findSnapPosition = useCallback(
-    (
-      panelId: string,
-      rawX: number,
-      rawY: number,
-      panelWidth: number,
-      panelHeight: number,
-    ): {
-      x: number;
-      y: number;
-      guides: SnapGuide[];
-      distances: DistanceIndicator[];
-    } => {
-      const snapPoints = getSnapPoints(panelId);
-      const guides: SnapGuide[] = [];
-      const distances: DistanceIndicator[] = [];
-
-      let snappedX = rawX;
-      let snappedY = rawY;
-
-      // Current panel edges and center
-      const edges = {
-        left: rawX,
-        centerX: rawX + panelWidth / 2,
-        right: rawX + panelWidth,
-        top: rawY,
-        centerY: rawY + panelHeight / 2,
-        bottom: rawY + panelHeight,
-      };
-
-      // Check X snapping (left, center, right edges)
-      let minXDiff = SNAP_THRESHOLD;
-      ["left", "centerX", "right"].forEach((edgeName) => {
-        const edgeValue = edges[edgeName as keyof typeof edges];
-        snapPoints.x.forEach((snapX) => {
-          const diff = Math.abs(edgeValue - snapX);
-          if (diff < minXDiff) {
-            minXDiff = diff;
-            // Adjust position based on which edge snapped
-            if (edgeName === "left") snappedX = snapX;
-            else if (edgeName === "centerX") snappedX = snapX - panelWidth / 2;
-            else if (edgeName === "right") snappedX = snapX - panelWidth;
-
-            // Add vertical guide
-            guides.push({
-              type: "vertical",
-              position: snapX,
-              start: Math.min(rawY, 0),
-              end: Math.max(rawY + panelHeight, 2000),
-            });
-          }
-        });
-      });
-
-      // Check Y snapping (top, center, bottom edges)
-      let minYDiff = SNAP_THRESHOLD;
-      ["top", "centerY", "bottom"].forEach((edgeName) => {
-        const edgeValue = edges[edgeName as keyof typeof edges];
-        snapPoints.y.forEach((snapY) => {
-          const diff = Math.abs(edgeValue - snapY);
-          if (diff < minYDiff) {
-            minYDiff = diff;
-            // Adjust position based on which edge snapped
-            if (edgeName === "top") snappedY = snapY;
-            else if (edgeName === "centerY") snappedY = snapY - panelHeight / 2;
-            else if (edgeName === "bottom") snappedY = snapY - panelHeight;
-
-            // Add horizontal guide
-            guides.push({
-              type: "horizontal",
-              position: snapY,
-              start: Math.min(rawX, 0),
-              end: Math.max(rawX + panelWidth, 2000),
-            });
-          }
-        });
-      });
-
-      // Calculate distance to nearest panels
-      panels.forEach((p) => {
-        if (p.id === panelId) return;
-        const visible = getVisibleDimensions(p, settings.thickness);
-
-        // Horizontal distance (left/right)
-        if (snappedY < p.y + visible.height && snappedY + panelHeight > p.y) {
-          // Overlapping vertically
-          if (snappedX + panelWidth <= p.x) {
-            // Current panel is to the left
-            const dist = p.x - (snappedX + panelWidth);
-            if (dist < 200) {
-              distances.push({
-                x1: snappedX + panelWidth,
-                y1:
-                  Math.max(snappedY, p.y) +
-                  Math.min(panelHeight, visible.height) / 2,
-                x2: p.x,
-                y2:
-                  Math.max(snappedY, p.y) +
-                  Math.min(panelHeight, visible.height) / 2,
-                distance: Math.round(dist),
-                orientation: "horizontal",
-              });
-            }
-          } else if (snappedX >= p.x + visible.width) {
-            // Current panel is to the right
-            const dist = snappedX - (p.x + visible.width);
-            if (dist < 200) {
-              distances.push({
-                x1: p.x + visible.width,
-                y1:
-                  Math.max(snappedY, p.y) +
-                  Math.min(panelHeight, visible.height) / 2,
-                x2: snappedX,
-                y2:
-                  Math.max(snappedY, p.y) +
-                  Math.min(panelHeight, visible.height) / 2,
-                distance: Math.round(dist),
-                orientation: "horizontal",
-              });
-            }
-          }
-        }
-
-        // Vertical distance (top/bottom)
-        if (snappedX < p.x + visible.width && snappedX + panelWidth > p.x) {
-          // Overlapping horizontally
-          if (snappedY + panelHeight <= p.y) {
-            // Current panel is above
-            const dist = p.y - (snappedY + panelHeight);
-            if (dist < 200) {
-              distances.push({
-                x1:
-                  Math.max(snappedX, p.x) +
-                  Math.min(panelWidth, visible.width) / 2,
-                y1: snappedY + panelHeight,
-                x2:
-                  Math.max(snappedX, p.x) +
-                  Math.min(panelWidth, visible.width) / 2,
-                y2: p.y,
-                distance: Math.round(dist),
-                orientation: "vertical",
-              });
-            }
-          } else if (snappedY >= p.y + visible.height) {
-            // Current panel is below
-            const dist = snappedY - (p.y + visible.height);
-            if (dist < 200) {
-              distances.push({
-                x1:
-                  Math.max(snappedX, p.x) +
-                  Math.min(panelWidth, visible.width) / 2,
-                y1: p.y + visible.height,
-                x2:
-                  Math.max(snappedX, p.x) +
-                  Math.min(panelWidth, visible.width) / 2,
-                y2: snappedY,
-                distance: Math.round(dist),
-                orientation: "vertical",
-              });
-            }
-          }
-        }
-      });
-
-      return { x: snappedX, y: snappedY, guides, distances };
-    },
-    [getSnapPoints, panels, settings.thickness],
-  );
-
-  // Track whether we've auto-centered on initial load
-  const hasAutoCentered = useRef(false);
-
-  // Resize observer to track container size
+  // ===========================================================================
+  // EFFECTS
+  // ===========================================================================
+  
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
-        if (width > 0 && height > 0) {
-          setCanvasSize({ width, height });
-        }
+        if (width > 0 && height > 0) setCanvasSize({ width, height });
       }
     });
-
     resizeObserver.observe(container);
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Zoom controls
-  const handleZoomIn = useCallback(() => {
-    setZoom((z) => Math.min(MAX_ZOOM, z + ZOOM_STEP));
-  }, []);
-
-  const handleZoomOut = useCallback(() => {
-    setZoom((z) => Math.max(MIN_ZOOM, z - ZOOM_STEP));
-  }, []);
-
-  const handleResetZoom = useCallback(() => {
-    setZoom(DEFAULT_ZOOM);
-    setPan({ x: 0, y: 0 });
-  }, []);
+  const handleZoomIn = useCallback(() => setZoom((z) => Math.min(MAX_ZOOM, z + ZOOM_STEP)), []);
+  const handleZoomOut = useCallback(() => setZoom((z) => Math.max(MIN_ZOOM, z - ZOOM_STEP)), []);
+  const handleResetZoom = useCallback(() => { setZoom(DEFAULT_ZOOM); setPan({ x: 0, y: 0 }); }, []);
 
   const handleFitToContent = useCallback(() => {
-    if (panels.length === 0) {
-      handleResetZoom();
-      return;
-    }
-    // Calculate bounding box of all panels
-    const minX = Math.min(...panels.map((p) => p.x));
-    const minY = Math.min(...panels.map((p) => p.y));
-    const maxX = Math.max(...panels.map((p) => p.x + p.width));
-    const maxY = Math.max(...panels.map((p) => p.y + p.height));
-    const contentWidth = maxX - minX + 100;
-    const contentHeight = maxY - minY + 100;
-
-    const fitZoom = Math.min(
-      canvasSize.width / contentWidth,
-      canvasSize.height / contentHeight,
-      1,
-    );
-    setZoom(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, fitZoom)));
-    setPan({
-      x:
-        -(minX - 50) * fitZoom +
-        (canvasSize.width - contentWidth * fitZoom) / 2,
-      y:
-        -(minY - 50) * fitZoom +
-        (canvasSize.height - contentHeight * fitZoom) / 2,
+    if (panels.length === 0) { handleResetZoom(); return; }
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    panels.forEach(p => {
+      const dims = getTrueDimensions(p, settings.thickness);
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x + dims.width);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y + dims.height);
     });
-  }, [panels, handleResetZoom, canvasSize]);
+    const contentWidth = maxX - minX + 100, contentHeight = maxY - minY + 100;
+    const centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2;
+    const fitZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.min(canvasSize.width / contentWidth, canvasSize.height / contentHeight, 1)));
+    setZoom(fitZoom);
+    setPan({ x: -centerX * fitZoom, y: centerY * fitZoom });
+  }, [panels, handleResetZoom, canvasSize, settings.thickness]);
 
-  // Auto-center on panels when canvas first loads with content
   useEffect(() => {
     if (hasAutoCentered.current || panels.length === 0 || canvasSize.width === 0) return;
-    
-    // Wait a tick for canvas size to settle
-    const timer = setTimeout(() => {
-      if (panels.length > 0 && canvasSize.width > 0 && canvasSize.height > 0) {
-        handleFitToContent();
-        hasAutoCentered.current = true;
-      }
-    }, 100);
-    
+    const timer = setTimeout(() => { handleFitToContent(); hasAutoCentered.current = true; }, 100);
     return () => clearTimeout(timer);
   }, [panels.length, canvasSize, handleFitToContent]);
 
-  // Copy selected panel
-  const handleCopy = useCallback(() => {
-    if (!selectedPanelId) return;
-    const panel = panels.find((p) => p.id === selectedPanelId);
-    if (panel) {
-      setClipboard({ ...panel });
-    }
-  }, [selectedPanelId, panels]);
-
-  // Paste copied panel
-  const handlePaste = useCallback(() => {
-    if (!clipboard) return;
-    const newPanel: Panel = {
-      ...clipboard,
-      id: `panel_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-      label: `${clipboard.label} copy`,
-      x: clipboard.x + 40,
-      y: clipboard.y + 40,
-    };
-    // Add to store manually
-    useDesignStore.getState().panels.push(newPanel);
-    useDesignStore.setState({ panels: [...useDesignStore.getState().panels] });
-    selectPanel(newPanel.id);
-  }, [clipboard, selectPanel]);
-
-  // Duplicate selected panel (Ctrl+D)
-  const handleDuplicate = useCallback(() => {
-    if (!selectedPanelId) return;
-    const panel = panels.find((p) => p.id === selectedPanelId);
-    if (!panel) return;
-
-    const newPanel: Panel = {
-      ...panel,
-      id: `panel_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-      label: `${panel.label} copy`,
-      x: panel.x + 40,
-      y: panel.y + 40,
-    };
-    useDesignStore.getState().panels.push(newPanel);
-    useDesignStore.setState({ panels: [...useDesignStore.getState().panels] });
-    selectPanel(newPanel.id);
-  }, [selectedPanelId, panels, selectPanel]);
-
-  // Mouse wheel zoom (Figma-style: Ctrl/Cmd + scroll = zoom, plain scroll = pan)
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
-
       if (e.ctrlKey || e.metaKey) {
-        // Zoom
-        const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-        setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z + delta)));
+        // Pinch zoom on trackpad - use proportional zoom for smoother experience
+        // Smaller delta for finer control, proportional to current zoom
+        const zoomFactor = 0.01; // Much smaller for trackpad pinch
+        const delta = -e.deltaY * zoomFactor;
+        setZoomLocal((z) => {
+          const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * (1 + delta)));
+          updateViewState({ zoom: newZoom });
+          return newZoom;
+        });
       } else {
-        // Pan (Figma-style scroll)
-        setPan((p) => ({
-          x: p.x - e.deltaX,
-          y: p.y - e.deltaY,
-        }));
+        // Two-finger pan on trackpad
+        setPanLocal((p) => {
+          const newPan = { x: p.x - e.deltaX, y: p.y - e.deltaY };
+          updateViewState({ panX: newPan.x, panY: newPan.y });
+          return newPan;
+        });
       }
     };
-
     container.addEventListener("wheel", handleWheel, { passive: false });
     return () => container.removeEventListener("wheel", handleWheel);
-  }, []);
+  }, [updateViewState]);
 
+  // ===========================================================================
+  // MOUSE HANDLERS
+  // ===========================================================================
+  
   const getSVGPoint = useCallback((e: React.MouseEvent) => {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
     const rect = svg.getBoundingClientRect();
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    };
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }, []);
+  
+  // Convert screen point to world coordinates
+  const screenToWorld = useCallback((screenX: number, screenY: number) => {
+    const worldX = viewBoxX + screenX / zoom;
+    const worldY = screenToWorldY(viewBoxY + screenY / zoom);
+    return { x: worldX, y: worldY };
+  }, [viewBoxX, viewBoxY, zoom]);
 
-  const handleMouseDown = useCallback(
-    (
-      e: React.MouseEvent,
-      panel: Panel,
-      action: "drag" | "resize",
-      corner?: string,
-    ) => {
-      e.stopPropagation();
+  const handleMouseDown = useCallback((e: React.MouseEvent, panel: Panel, action: "drag" | "resize", corner?: string) => {
+    e.stopPropagation();
+    setDragStart(getSVGPoint(e));
+    setPanelStart({ x: panel.x, y: panel.y, width: panel.width, height: panel.height });
+    setDragAxis("free");
+    setHasDuplicatedOnDrag(false);
+    
+    // Save to history before drag/resize starts (for undo)
+    saveToHistory();
+    
+    if (action === "drag") {
+      const isAlreadySelected = selectedPanelIds.includes(panel.id);
+      
+      // Alt+drag = duplicate
+      if (e.altKey) {
+        // Duplicate all selected panels if this panel is selected, otherwise just this one
+        const panelsToDuplicate = isAlreadySelected ? panels.filter(p => selectedPanelIds.includes(p.id)) : [panel];
+        const newPanels = panelsToDuplicate.map(p => ({
+          ...p,
+          id: `panel_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+          label: `${p.label} copy`,
+        }));
+        useDesignStore.setState({ panels: [...useDesignStore.getState().panels, ...newPanels] });
+        selectPanels(newPanels.map(p => p.id));
+        setDragging(newPanels[0].id);
+        setDraggingMultiple(newPanels.length > 1);
+        // Store start positions for all new panels
+        const startPos = new Map<string, { x: number; y: number }>();
+        newPanels.forEach(p => startPos.set(p.id, { x: p.x, y: p.y }));
+        setDragStartPositions(startPos);
+        setHasDuplicatedOnDrag(true);
+      } else {
+        // Shift+click = add to selection
+        if (e.shiftKey) {
+          selectPanel(panel.id, true);
+          setDragging(panel.id);
+        } else if (isAlreadySelected && selectedPanelIds.length > 1) {
+          // Dragging one of multiple selected panels - move all
+          setDragging(panel.id);
+          setDraggingMultiple(true);
+          // Store start positions for all selected panels
+          const startPos = new Map<string, { x: number; y: number }>();
+          panels.filter(p => selectedPanelIds.includes(p.id)).forEach(p => startPos.set(p.id, { x: p.x, y: p.y }));
+          setDragStartPositions(startPos);
+        } else {
+          // Single selection
+          selectPanel(panel.id);
+          setDragging(panel.id);
+          setDraggingMultiple(false);
+        }
+      }
+    } else if (action === "resize" && corner) {
       selectPanel(panel.id);
+      setResizing({ id: panel.id, corner });
+    }
+  }, [selectPanel, selectPanels, selectedPanelIds, panels, getSVGPoint, saveToHistory]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    // Handle sticky note dragging
+    if (draggingNote) {
       const point = getSVGPoint(e);
-      setDragStart(point);
-      setPanelStart({
-        x: panel.x,
-        y: panel.y,
-        width: panel.width,
-        height: panel.height,
+      const dxScreen = point.x - dragStart.x;
+      const dyScreen = point.y - dragStart.y;
+      const dxWorld = dxScreen / zoom;
+      const dyWorld = -dyScreen / zoom; // Invert for Y-up
+      updateStickyNote(draggingNote, {
+        x: noteStart.x + dxWorld,
+        y: noteStart.y + dyWorld,
       });
-
-      if (action === "drag") {
-        setDragging(panel.id);
-      } else if (action === "resize" && corner) {
-        setResizing({ id: panel.id, corner });
-      }
-    },
-    [selectPanel, getSVGPoint],
-  );
-
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      // Handle canvas panning
-      if (isPanning) {
-        const dx = e.clientX - panStart.x;
-        const dy = e.clientY - panStart.y;
-        setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
-        setPanStart({ x: e.clientX, y: e.clientY });
-        return;
-      }
-
-      if (!dragging && !resizing) return;
+      return;
+    }
+    
+    // Handle marquee selection
+    if (isMarqueeSelecting) {
       const point = getSVGPoint(e);
-      const dx = (point.x - dragStart.x) / zoom;
-      const dy = (point.y - dragStart.y) / zoom;
+      const worldPoint = screenToWorld(point.x, point.y);
+      setMarqueeEnd({ x: worldPoint.x, y: worldPoint.y });
+      
+      // Find panels within marquee
+      const minX = Math.min(marqueeStart.x, worldPoint.x);
+      const maxX = Math.max(marqueeStart.x, worldPoint.x);
+      const minY = Math.min(marqueeStart.y, worldPoint.y);
+      const maxY = Math.max(marqueeStart.y, worldPoint.y);
+      
+      const selectedIds = panels.filter(p => {
+        const dims = getTrueDimensions(p, settings.thickness);
+        const panelMinX = p.x;
+        const panelMaxX = p.x + dims.width;
+        const panelMinY = p.y;
+        const panelMaxY = p.y + dims.height;
+        // Check if panel intersects with marquee
+        return panelMinX < maxX && panelMaxX > minX && panelMinY < maxY && panelMaxY > minY;
+      }).map(p => p.id);
+      
+      selectPanels(selectedIds);
+      return;
+    }
+    
+    if (isPanning) {
+      setPan((p) => ({ x: p.x + e.clientX - panStart.x, y: p.y + e.clientY - panStart.y }));
+      setPanStart({ x: e.clientX, y: e.clientY });
+      return;
+    }
+    if (!dragging && !resizing) return;
+    
+    const point = getSVGPoint(e);
+    let dxWorld = (point.x - dragStart.x) / zoom;
+    let dyWorld = -(point.y - dragStart.y) / zoom;
 
-      if (dragging) {
+    if (dragging) {
+      // Shift key = constrain to axis
+      if (e.shiftKey && !isMarqueeSelecting) {
+        const threshold = 5 / zoom;
+        if (dragAxis === "free") {
+          if (Math.abs(dxWorld) > threshold || Math.abs(dyWorld) > threshold) {
+            setDragAxis(Math.abs(dxWorld) > Math.abs(dyWorld) ? "horizontal" : "vertical");
+          }
+        }
+        if (dragAxis === "horizontal") dyWorld = 0;
+        else if (dragAxis === "vertical") dxWorld = 0;
+      } else {
+        if (dragAxis !== "free") setDragAxis("free");
+      }
+      
+      // Move all selected panels if dragging multiple
+      if (draggingMultiple && dragStartPositions.size > 0) {
+        const disableSnap = e.ctrlKey || e.metaKey;
+        
+        // For multi-select, snap based on the primary dragged panel
+        const primaryPanel = panels.find(p => p.id === dragging);
+        if (!primaryPanel) return;
+        
+        const trueDims = getTrueDimensions(primaryPanel, settings.thickness);
+        const primaryStartPos = dragStartPositions.get(primaryPanel.id);
+        if (!primaryStartPos) return;
+        
+        const rawX = primaryStartPos.x + dxWorld;
+        const rawY = primaryStartPos.y + dyWorld;
+        
+        let finalX = rawX, finalY = rawY;
+        
+        if (disableSnap) {
+          setSnapGuides([]);
+          finalX = Math.round(rawX / GRID_SIZE) * GRID_SIZE;
+          finalY = Math.round(rawY / GRID_SIZE) * GRID_SIZE;
+        } else {
+          const { x: snappedX, y: snappedY, guides } = findSnapPosition(selectedPanelIds, rawX, rawY, trueDims.width, trueDims.height);
+          setSnapGuides(guides);
+          finalX = guides.some(g => g.type === "vertical") ? snappedX : Math.round(rawX / GRID_SIZE) * GRID_SIZE;
+          finalY = guides.some(g => g.type === "horizontal") ? snappedY : Math.round(rawY / GRID_SIZE) * GRID_SIZE;
+        }
+        
+        // Calculate delta from snapped primary position
+        const deltaX = finalX - primaryStartPos.x;
+        const deltaY = finalY - primaryStartPos.y;
+        
+        // Move all selected panels by the same delta
+        panels.filter(p => selectedPanelIds.includes(p.id)).forEach(p => {
+          const startPos = dragStartPositions.get(p.id);
+          if (startPos) {
+            updatePanel(p.id, { 
+              x: Math.round((startPos.x + deltaX) / GRID_SIZE) * GRID_SIZE, 
+              y: Math.round((startPos.y + deltaY) / GRID_SIZE) * GRID_SIZE 
+            });
+          }
+        });
+      } else {
+        // Single panel drag with snapping
         const draggedPanel = panels.find((p) => p.id === dragging);
         if (!draggedPanel) return;
-
-        // Use TRUE dimensions for snapping calculations
-        const visible = getTrueVisibleDimensions(draggedPanel, settings.thickness);
-        const rawX = panelStart.x + dx;
-        const rawY = panelStart.y + dy;
-
-        // Apply smart snapping
-        const {
-          x: snappedX,
-          y: snappedY,
-          guides,
-          distances,
-        } = findSnapPosition(
-          dragging,
-          rawX,
-          rawY,
-          visible.width,
-          visible.height,
-        );
-
-        // Update guides and distances
-        setSnapGuides(guides);
-        setDistanceIndicators(distances);
-
-        // If no snap, fall back to grid snap
-        const finalX = guides.some((g) => g.type === "vertical")
-          ? snappedX
-          : Math.round(rawX / GRID_SIZE) * GRID_SIZE;
-        const finalY = guides.some((g) => g.type === "horizontal")
-          ? snappedY
-          : Math.round(rawY / GRID_SIZE) * GRID_SIZE;
-
-        updatePanel(dragging, {
-          x: finalX,
-          y: finalY,
-        });
-      } else if (resizing) {
-        const { corner } = resizing;
-        let newWidth = panelStart.width;
-        let newHeight = panelStart.height;
-        let newX = panelStart.x;
-        let newY = panelStart.y;
-
-        if (corner.includes("e"))
-          newWidth = Math.max(50, panelStart.width + dx);
-        if (corner.includes("w")) {
-          newWidth = Math.max(50, panelStart.width - dx);
-          newX = panelStart.x + (panelStart.width - newWidth);
+        
+        const trueDims = getTrueDimensions(draggedPanel, settings.thickness);
+        const rawX = panelStart.x + dxWorld, rawY = panelStart.y + dyWorld;
+        
+        if (e.ctrlKey || e.metaKey) {
+          setSnapGuides([]);
+          const finalX = Math.round(rawX / GRID_SIZE) * GRID_SIZE;
+          const finalY = Math.round(rawY / GRID_SIZE) * GRID_SIZE;
+          updatePanel(dragging, { x: finalX, y: finalY });
+        } else {
+          const { x: snappedX, y: snappedY, guides } = findSnapPosition([dragging], rawX, rawY, trueDims.width, trueDims.height);
+          setSnapGuides(guides);
+          const finalX = guides.some(g => g.type === "vertical") ? snappedX : Math.round(rawX / GRID_SIZE) * GRID_SIZE;
+          const finalY = guides.some(g => g.type === "horizontal") ? snappedY : Math.round(rawY / GRID_SIZE) * GRID_SIZE;
+          updatePanel(dragging, { x: finalX, y: finalY });
         }
-        if (corner.includes("s"))
-          newHeight = Math.max(50, panelStart.height + dy);
-        if (corner.includes("n")) {
-          newHeight = Math.max(50, panelStart.height - dy);
-          newY = panelStart.y + (panelStart.height - newHeight);
-        }
-
-        updatePanel(resizing.id, {
-          x: Math.round(newX / GRID_SIZE) * GRID_SIZE,
-          y: Math.round(newY / GRID_SIZE) * GRID_SIZE,
-          width: Math.round(newWidth / GRID_SIZE) * GRID_SIZE,
-          height: Math.round(newHeight / GRID_SIZE) * GRID_SIZE,
-        });
       }
-    },
-    [
-      dragging,
-      resizing,
-      dragStart,
-      panelStart,
-      getSVGPoint,
-      updatePanel,
-      isPanning,
-      panStart,
-      zoom,
-      panels,
-      settings.thickness,
-      findSnapPosition,
-    ],
-  );
+    } else if (resizing) {
+      const { corner } = resizing;
+      let newWidth = panelStart.width, newHeight = panelStart.height, newX = panelStart.x, newY = panelStart.y;
+      if (corner.includes("e")) newWidth = Math.max(50, panelStart.width + dxWorld);
+      if (corner.includes("w")) { newWidth = Math.max(50, panelStart.width - dxWorld); newX = panelStart.x + panelStart.width - newWidth; }
+      if (corner.includes("n")) newHeight = Math.max(50, panelStart.height + dyWorld);
+      if (corner.includes("s")) { newHeight = Math.max(50, panelStart.height - dyWorld); newY = panelStart.y + panelStart.height - newHeight; }
+      updatePanel(resizing.id, {
+        x: Math.round(newX / GRID_SIZE) * GRID_SIZE, y: Math.round(newY / GRID_SIZE) * GRID_SIZE,
+        width: Math.round(newWidth / GRID_SIZE) * GRID_SIZE, height: Math.round(newHeight / GRID_SIZE) * GRID_SIZE,
+      });
+    }
+  }, [dragging, draggingMultiple, dragStartPositions, resizing, dragStart, panelStart, getSVGPoint, screenToWorld, updatePanel, isPanning, panStart, zoom, panels, settings.thickness, findSnapPosition, isMarqueeSelecting, marqueeStart, selectPanels, selectedPanelIds, dragAxis, draggingNote, noteStart, updateStickyNote]);
 
   const handleMouseUp = useCallback(() => {
     setDragging(null);
+    setDraggingMultiple(false);
+    setDragStartPositions(new Map());
     setResizing(null);
     setIsPanning(false);
     setSnapGuides([]);
-    setDistanceIndicators([]);
+    setDragAxis("free");
+    setHasDuplicatedOnDrag(false);
+    setIsMarqueeSelecting(false);
+    setDraggingNote(null);
   }, []);
-
-  const handleCanvasClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.target === svgRef.current) {
-        selectPanel(null);
+  
+  const handleCanvasClick = useCallback((e: React.MouseEvent) => {
+    // If sticky note tool is active, add a new note
+    if (stickyNoteTool) {
+      const point = getSVGPoint(e);
+      const worldPoint = screenToWorld(point.x, point.y);
+      addStickyNote(worldPoint.x, worldPoint.y);
+      setStickyNoteTool(false);
+      return;
+    }
+    if (e.target === svgRef.current) selectPanel(null);
+  }, [selectPanel, stickyNoteTool, getSVGPoint, screenToWorld, addStickyNote]);
+  
+  const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button === 1 || spaceHeld || tool === "pan") {
+      e.preventDefault();
+      setIsPanning(true);
+      setPanStart({ x: e.clientX, y: e.clientY });
+    } else if (tool === "select" && e.button === 0 && !spaceHeld) {
+      // Start marquee selection on empty canvas area
+      const target = e.target as SVGElement;
+      if (target.tagName === "rect" && !target.closest("g[data-panel]")) {
+        const point = getSVGPoint(e);
+        const worldPoint = screenToWorld(point.x, point.y);
+        setMarqueeStart({ x: worldPoint.x, y: worldPoint.y });
+        setMarqueeEnd({ x: worldPoint.x, y: worldPoint.y });
+        setIsMarqueeSelecting(true);
+        if (!e.shiftKey) selectPanel(null); // Clear selection unless shift held
       }
-    },
-    [selectPanel],
-  );
+    }
+  }, [spaceHeld, tool, getSVGPoint, screenToWorld, selectPanel]);
 
-  // Handle canvas mouse down for panning (Space + drag or middle mouse or hand tool)
-  const handleCanvasMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.button === 1 || spaceHeld || tool === "pan") {
-        // Middle mouse button, space held, or hand tool
-        e.preventDefault();
-        setIsPanning(true);
-        setPanStart({ x: e.clientX, y: e.clientY });
-      }
-    },
-    [spaceHeld, tool],
-  );
+  // ===========================================================================
+  // KEYBOARD
+  // ===========================================================================
+  
+  const handleCopy = useCallback(() => {
+    const selected = panels.filter(p => selectedPanelIds.includes(p.id));
+    if (selected.length > 0) setClipboard(selected.map(p => ({ ...p })));
+  }, [selectedPanelIds, panels]);
+  
+  const handlePaste = useCallback(() => {
+    if (clipboard.length === 0) return;
+    saveToHistory();
+    const newPanels = clipboard.map(p => ({
+      ...p,
+      id: `panel_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      label: `${p.label} copy`,
+      x: p.x + 40,
+      y: p.y + 40,
+    }));
+    useDesignStore.setState({ panels: [...useDesignStore.getState().panels, ...newPanels] });
+    selectPanels(newPanels.map(p => p.id));
+  }, [clipboard, selectPanels, saveToHistory]);
+  
+  const handleDuplicate = useCallback(() => {
+    const selected = panels.filter(p => selectedPanelIds.includes(p.id));
+    if (selected.length === 0) return;
+    saveToHistory();
+    const newPanels = selected.map(p => ({
+      ...p,
+      id: `panel_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      label: `${p.label} copy`,
+      x: p.x + 40,
+      y: p.y + 40,
+    }));
+    useDesignStore.setState({ panels: [...useDesignStore.getState().panels, ...newPanels] });
+    selectPanels(newPanels.map(p => p.id));
+  }, [selectedPanelIds, panels, selectPanels, saveToHistory]);
 
-  // Figma-style keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isInput = (e.target as HTMLElement).tagName === "INPUT";
-
-      // Space for panning (hold)
-      if (e.code === "Space" && !isInput) {
+      // Track modifier keys
+      if (e.shiftKey) setShiftHeld(true);
+      if (e.altKey) setAltHeld(true);
+      if (e.ctrlKey || e.metaKey) setCtrlHeld(true);
+      
+      if (e.code === "Space" && !isInput) { e.preventDefault(); setSpaceHeld(true); }
+      if (e.key === "Escape") { selectPanel(null); setDragging(null); setResizing(null); setSnapGuides([]); setIsMarqueeSelecting(false); }
+      
+      // Delete selected panels
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedPanelIds.length > 0 && !isInput) {
         e.preventDefault();
-        setSpaceHeld(true);
+        if (selectedPanelIds.length === 1) {
+          deletePanel(selectedPanelIds[0]);
+        } else {
+          deletePanels(selectedPanelIds);
+        }
       }
-
-      // Escape to deselect
-      if (e.key === "Escape") {
-        selectPanel(null);
-      }
-
-      // Delete/Backspace to delete
-      if (
-        (e.key === "Delete" || e.key === "Backspace") &&
-        selectedPanelId &&
-        !isInput
-      ) {
-        e.preventDefault();
-        deletePanel(selectedPanelId);
-      }
-
-      // Zoom shortcuts
       if (isInput) return;
-
+      
+      // Undo/Redo
+      if ((e.metaKey || e.ctrlKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "z" && e.shiftKey) { e.preventDefault(); redo(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "y") { e.preventDefault(); redo(); }
+      
       if (e.key === "=" || e.key === "+") handleZoomIn();
       if (e.key === "-") handleZoomOut();
       if (e.key === "0") handleResetZoom();
-      if (e.key === "1") setZoom(1); // 100%
-      if (e.key === "2") setZoom(0.5); // 50%
-
-      // Tool shortcuts (Figma-style)
-      if (e.key === "v" || e.key === "V") setTool("select");
-      if (e.key === "h" || e.key === "H") setTool("pan");
-
-      // Copy/Paste/Duplicate
-      if ((e.metaKey || e.ctrlKey) && e.key === "c") {
+      if (e.key === "f") handleFitToContent();
+      if (e.key === "v") setTool("select");
+      if (e.key === "h") setTool("pan");
+      if (e.key === "r") setShowRulers(r => !r);
+      if (e.key === "m") setShowMeasurements(m => !m);
+      if (e.key === "n") setStickyNoteTool(n => !n);
+      if (e.key === "p" && !e.metaKey && !e.ctrlKey) { e.preventDefault(); setShowPrintView(true); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "c") { e.preventDefault(); handleCopy(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "v") { e.preventDefault(); handlePaste(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "d") { e.preventDefault(); handleDuplicate(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "a") { e.preventDefault(); selectAll(); }
+      
+      // Arrow key nudge - move all selected panels
+      if (selectedPanelIds.length > 0 && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
         e.preventDefault();
-        handleCopy();
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === "v") {
-        e.preventDefault();
-        handlePaste();
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === "d") {
-        e.preventDefault();
-        handleDuplicate();
-      }
-
-      // Arrow keys to nudge selected panel
-      if (
-        selectedPanelId &&
-        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)
-      ) {
-        e.preventDefault();
-        const panel = panels.find((p) => p.id === selectedPanelId);
-        if (!panel) return;
-
+        saveToHistory();
         const amount = e.shiftKey ? NUDGE_AMOUNT_LARGE : NUDGE_AMOUNT;
-        const updates: Partial<Panel> = {};
-
-        if (e.key === "ArrowUp") updates.y = panel.y - amount;
-        if (e.key === "ArrowDown") updates.y = panel.y + amount;
-        if (e.key === "ArrowLeft") updates.x = panel.x - amount;
-        if (e.key === "ArrowRight") updates.x = panel.x + amount;
-
-        updatePanel(selectedPanelId, updates);
+        selectedPanelIds.forEach(id => {
+          const panel = panels.find(p => p.id === id);
+          if (!panel) return;
+          if (e.key === "ArrowUp") updatePanel(id, { y: panel.y + amount });
+          if (e.key === "ArrowDown") updatePanel(id, { y: panel.y - amount });
+          if (e.key === "ArrowLeft") updatePanel(id, { x: panel.x - amount });
+          if (e.key === "ArrowRight") updatePanel(id, { x: panel.x + amount });
+        });
       }
     };
-
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space") {
-        setSpaceHeld(false);
-        setIsPanning(false);
-      }
+      if (e.code === "Space") { setSpaceHeld(false); setIsPanning(false); }
+      if (!e.shiftKey) setShiftHeld(false);
+      if (!e.altKey) setAltHeld(false);
+      if (!e.ctrlKey && !e.metaKey) setCtrlHeld(false);
     };
-
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-    };
-  }, [
-    selectedPanelId,
-    deletePanel,
-    handleZoomIn,
-    handleZoomOut,
-    handleResetZoom,
-    handleCopy,
-    handlePaste,
-    handleDuplicate,
-    panels,
-    updatePanel,
-    selectPanel,
-  ]);
+    return () => { window.removeEventListener("keydown", handleKeyDown); window.removeEventListener("keyup", handleKeyUp); };
+  }, [selectedPanelIds, deletePanels, deletePanel, handleZoomIn, handleZoomOut, handleResetZoom, handleFitToContent, handleCopy, handlePaste, handleDuplicate, panels, updatePanel, selectPanel, selectAll, undo, redo, saveToHistory]);
 
-  // Calculate viewBox based on zoom and pan (needed for rendering functions)
-  const viewBoxWidth = canvasSize.width / zoom;
-  const viewBoxHeight = canvasSize.height / zoom;
-  const viewBoxX = -pan.x / zoom;
-  const viewBoxY = -pan.y / zoom;
-
+  // ===========================================================================
+  // RENDER HELPERS
+  // ===========================================================================
+  
   const renderGrid = () => {
     const lines = [];
-    // Calculate visible area based on canvas size and zoom
-    const viewWidth = canvasSize.width / zoom;
-    const viewHeight = canvasSize.height / zoom;
-
-    // Calculate the visible viewport bounds
-    const startX =
-      Math.floor(-pan.x / zoom / GRID_SIZE) * GRID_SIZE - GRID_SIZE;
-    const startY =
-      Math.floor(-pan.y / zoom / GRID_SIZE) * GRID_SIZE - GRID_SIZE;
-    const endX = startX + viewWidth + GRID_SIZE * 3;
-    const endY = startY + viewHeight + GRID_SIZE * 3;
-
-    for (let x = startX; x <= endX; x += GRID_SIZE) {
-      lines.push(
-        <line
-          key={`v${x}`}
-          x1={x}
-          y1={startY}
-          x2={x}
-          y2={endY}
-          stroke="#ddd"
-          strokeWidth={1 / zoom}
-        />,
-      );
-    }
-    for (let y = startY; y <= endY; y += GRID_SIZE) {
-      lines.push(
-        <line
-          key={`h${y}`}
-          x1={startX}
-          y1={y}
-          x2={endX}
-          y2={y}
-          stroke="#ddd"
-          strokeWidth={1 / zoom}
-        />,
-      );
-    }
+    const startX = Math.floor(viewBoxX / GRID_SIZE) * GRID_SIZE;
+    const endX = viewBoxX + viewBoxWidth + GRID_SIZE;
+    const startY = Math.floor(viewBoxY / GRID_SIZE) * GRID_SIZE;
+    const endY = viewBoxY + viewBoxHeight + GRID_SIZE;
+    for (let x = startX; x <= endX; x += GRID_SIZE) lines.push(<line key={`v${x}`} x1={x} y1={startY} x2={x} y2={endY} stroke="#e5e5e5" strokeWidth={1 / zoom} />);
+    for (let y = startY; y <= endY; y += GRID_SIZE) lines.push(<line key={`h${y}`} x1={startX} y1={y} x2={endX} y2={y} stroke="#e5e5e5" strokeWidth={1 / zoom} />);
     return lines;
   };
 
-  // Render horizontal ruler (top)
   const renderHorizontalRuler = () => {
     if (!showRulers) return null;
-    
-    const elements = [];
-    const rulerStep = zoom > 0.5 ? 50 : zoom > 0.2 ? 100 : 200; // mm between major ticks
-    const minorStep = rulerStep / 5;
-    
-    // Calculate visible range in mm
-    const startMm = Math.floor(viewBoxX / rulerStep) * rulerStep - rulerStep;
-    const endMm = viewBoxX + viewBoxWidth + rulerStep;
-    
-    // Major ticks with labels
-    for (let mm = startMm; mm <= endMm; mm += rulerStep) {
-      if (mm < 0) continue;
-      elements.push(
-        <g key={`htick-${mm}`}>
-          <line
-            x1={mm}
-            y1={viewBoxY}
-            x2={mm}
-            y2={viewBoxY + 12 / zoom}
-            stroke="#666"
-            strokeWidth={1 / zoom}
-          />
-          <text
-            x={mm + 3 / zoom}
-            y={viewBoxY + 20 / zoom}
-            fontSize={9 / zoom}
-            fill="#666"
-          >
-            {mm}
-          </text>
-        </g>
-      );
-    }
-    
-    // Minor ticks
-    for (let mm = startMm; mm <= endMm; mm += minorStep) {
-      if (mm < 0 || mm % rulerStep === 0) continue;
-      elements.push(
-        <line
-          key={`hminor-${mm}`}
-          x1={mm}
-          y1={viewBoxY}
-          x2={mm}
-          y2={viewBoxY + 6 / zoom}
-          stroke="#999"
-          strokeWidth={0.5 / zoom}
-        />
-      );
-    }
-    
+    const step = zoom > 0.5 ? 50 : zoom > 0.2 ? 100 : 200;
+    const start = Math.floor(viewBoxX / step) * step;
     return (
-      <g className="ruler-horizontal">
-        {/* Ruler background */}
-        <rect
-          x={viewBoxX}
-          y={viewBoxY}
-          width={viewBoxWidth}
-          height={RULER_SIZE / zoom}
-          fill="rgba(255,255,255,0.95)"
-        />
-        {elements}
-        {/* Bottom border */}
-        <line
-          x1={viewBoxX}
-          y1={viewBoxY + RULER_SIZE / zoom}
-          x2={viewBoxX + viewBoxWidth}
-          y2={viewBoxY + RULER_SIZE / zoom}
-          stroke="#ccc"
-          strokeWidth={1 / zoom}
-        />
+      <g>
+        <rect x={viewBoxX} y={viewBoxY} width={viewBoxWidth} height={RULER_SIZE / zoom} fill="rgba(255,255,255,0.95)" />
+        {Array.from({ length: Math.ceil(viewBoxWidth / step) + 2 }).map((_, i) => {
+          const x = start + i * step;
+          return (
+            <g key={x}>
+              <line x1={x} y1={viewBoxY} x2={x} y2={viewBoxY + 12 / zoom} stroke="#666" strokeWidth={1 / zoom} />
+              <text x={x + 2 / zoom} y={viewBoxY + 20 / zoom} fontSize={9 / zoom} fill="#666">{x}</text>
+            </g>
+          );
+        })}
       </g>
     );
   };
 
-  // Render vertical ruler (left) - displays inverted Y (positive = UP)
   const renderVerticalRuler = () => {
     if (!showRulers) return null;
-    
-    const elements = [];
-    const rulerStep = zoom > 0.5 ? 50 : zoom > 0.2 ? 100 : 200; // mm between major ticks
-    const minorStep = rulerStep / 5;
-    
-    // Calculate visible range in mm (internal coords, Y+ = down)
-    const startMm = Math.floor(viewBoxY / rulerStep) * rulerStep - rulerStep;
-    const endMm = viewBoxY + viewBoxHeight + rulerStep;
-    
-    // Major ticks with labels - show INVERTED values (so positive = up)
-    for (let mm = startMm; mm <= endMm; mm += rulerStep) {
-      // Display inverted: internal Y=100 shows as -100 (below floor)
-      // internal Y=-100 shows as 100 (above floor)
-      const displayValue = -mm;
-      elements.push(
-        <g key={`vtick-${mm}`}>
-          <line
-            x1={viewBoxX}
-            y1={mm}
-            x2={viewBoxX + 12 / zoom}
-            y2={mm}
-            stroke="#666"
-            strokeWidth={1 / zoom}
-          />
-          <text
-            x={viewBoxX + 14 / zoom}
-            y={mm + 3 / zoom}
-            fontSize={9 / zoom}
-            fill="#666"
-          >
-            {displayValue}
-          </text>
-        </g>
-      );
-    }
-    
-    // Minor ticks
-    for (let mm = startMm; mm <= endMm; mm += minorStep) {
-      if (mm % rulerStep === 0) continue;
-      elements.push(
-        <line
-          key={`vminor-${mm}`}
-          x1={viewBoxX}
-          y1={mm}
-          x2={viewBoxX + 6 / zoom}
-          y2={mm}
-          stroke="#999"
-          strokeWidth={0.5 / zoom}
-        />
-      );
-    }
-    
+    const step = zoom > 0.5 ? 50 : zoom > 0.2 ? 100 : 200;
+    const start = Math.floor(viewBoxY / step) * step;
     return (
-      <g className="ruler-vertical">
-        {/* Ruler background */}
-        <rect
-          x={viewBoxX}
-          y={viewBoxY}
-          width={RULER_SIZE / zoom}
-          height={viewBoxHeight}
-          fill="rgba(255,255,255,0.95)"
-        />
-        {elements}
-        {/* Right border */}
-        <line
-          x1={viewBoxX + RULER_SIZE / zoom}
-          y1={viewBoxY}
-          x2={viewBoxX + RULER_SIZE / zoom}
-          y2={viewBoxY + viewBoxHeight}
-          stroke="#ccc"
-          strokeWidth={1 / zoom}
-        />
+      <g>
+        <rect x={viewBoxX} y={viewBoxY} width={RULER_SIZE / zoom} height={viewBoxHeight} fill="rgba(255,255,255,0.95)" />
+        {Array.from({ length: Math.ceil(viewBoxHeight / step) + 2 }).map((_, i) => {
+          const screenY = start + i * step;
+          const worldY = screenToWorldY(screenY);
+          return (
+            <g key={screenY}>
+              <line x1={viewBoxX} y1={screenY} x2={viewBoxX + 12 / zoom} y2={screenY} stroke="#666" strokeWidth={1 / zoom} />
+              <text x={viewBoxX + 14 / zoom} y={screenY + 3 / zoom} fontSize={9 / zoom} fill="#666">{worldY}</text>
+            </g>
+          );
+        })}
       </g>
     );
   };
 
-  // Render position indicator for selected panel
-  const renderSelectedPanelIndicator = () => {
-    if (!calculateGaps) return null;
-    
-    const { panel, visible, gapAbove, gapBelow, gapLeft, gapRight } = calculateGaps;
-    const elements = [];
-    
-    // Gap indicators - lines showing distance to adjacent panels
-    const indicatorColor = "#8b5cf6"; // Purple for gap indicators
-    
-    // Gap above
-    if (gapAbove && gapAbove.distance > 0) {
-      const x = panel.x + visible.width / 2;
-      const y1 = panel.y;
-      const y2 = panel.y - gapAbove.distance;
-      
-      elements.push(
-        <g key="gap-above">
-          <line x1={x} y1={y1} x2={x} y2={y2} stroke={indicatorColor} strokeWidth={2 / zoom} strokeDasharray={`${4/zoom},${4/zoom}`} />
-          <line x1={x - 8/zoom} y1={y1} x2={x + 8/zoom} y2={y1} stroke={indicatorColor} strokeWidth={2/zoom} />
-          <line x1={x - 8/zoom} y1={y2} x2={x + 8/zoom} y2={y2} stroke={indicatorColor} strokeWidth={2/zoom} />
-          <rect x={x - 25/zoom} y={(y1+y2)/2 - 10/zoom} width={50/zoom} height={20/zoom} fill={indicatorColor} rx={4/zoom} />
-          <text x={x} y={(y1+y2)/2 + 4/zoom} textAnchor="middle" fontSize={11/zoom} fill="white" fontWeight={600}>
-            {Math.round(gapAbove.distance)}
-          </text>
-        </g>
-      );
-    }
-    
-    // Gap below
-    if (gapBelow && gapBelow.distance > 0) {
-      const x = panel.x + visible.width / 2;
-      const y1 = panel.y + visible.height;
-      const y2 = y1 + gapBelow.distance;
-      
-      elements.push(
-        <g key="gap-below">
-          <line x1={x} y1={y1} x2={x} y2={y2} stroke={indicatorColor} strokeWidth={2 / zoom} strokeDasharray={`${4/zoom},${4/zoom}`} />
-          <line x1={x - 8/zoom} y1={y1} x2={x + 8/zoom} y2={y1} stroke={indicatorColor} strokeWidth={2/zoom} />
-          <line x1={x - 8/zoom} y1={y2} x2={x + 8/zoom} y2={y2} stroke={indicatorColor} strokeWidth={2/zoom} />
-          <rect x={x - 25/zoom} y={(y1+y2)/2 - 10/zoom} width={50/zoom} height={20/zoom} fill={indicatorColor} rx={4/zoom} />
-          <text x={x} y={(y1+y2)/2 + 4/zoom} textAnchor="middle" fontSize={11/zoom} fill="white" fontWeight={600}>
-            {Math.round(gapBelow.distance)}
-          </text>
-        </g>
-      );
-    }
-    
-    // Gap left
-    if (gapLeft && gapLeft.distance > 0) {
-      const y = panel.y + visible.height / 2;
-      const x1 = panel.x;
-      const x2 = panel.x - gapLeft.distance;
-      
-      elements.push(
-        <g key="gap-left">
-          <line x1={x1} y1={y} x2={x2} y2={y} stroke={indicatorColor} strokeWidth={2 / zoom} strokeDasharray={`${4/zoom},${4/zoom}`} />
-          <line x1={x1} y1={y - 8/zoom} x2={x1} y2={y + 8/zoom} stroke={indicatorColor} strokeWidth={2/zoom} />
-          <line x1={x2} y1={y - 8/zoom} x2={x2} y2={y + 8/zoom} stroke={indicatorColor} strokeWidth={2/zoom} />
-          <rect x={(x1+x2)/2 - 25/zoom} y={y - 10/zoom} width={50/zoom} height={20/zoom} fill={indicatorColor} rx={4/zoom} />
-          <text x={(x1+x2)/2} y={y + 4/zoom} textAnchor="middle" fontSize={11/zoom} fill="white" fontWeight={600}>
-            {Math.round(gapLeft.distance)}
-          </text>
-        </g>
-      );
-    }
-    
-    // Gap right
-    if (gapRight && gapRight.distance > 0) {
-      const y = panel.y + visible.height / 2;
-      const x1 = panel.x + visible.width;
-      const x2 = x1 + gapRight.distance;
-      
-      elements.push(
-        <g key="gap-right">
-          <line x1={x1} y1={y} x2={x2} y2={y} stroke={indicatorColor} strokeWidth={2 / zoom} strokeDasharray={`${4/zoom},${4/zoom}`} />
-          <line x1={x1} y1={y - 8/zoom} x2={x1} y2={y + 8/zoom} stroke={indicatorColor} strokeWidth={2/zoom} />
-          <line x1={x2} y1={y - 8/zoom} x2={x2} y2={y + 8/zoom} stroke={indicatorColor} strokeWidth={2/zoom} />
-          <rect x={(x1+x2)/2 - 25/zoom} y={y - 10/zoom} width={50/zoom} height={20/zoom} fill={indicatorColor} rx={4/zoom} />
-          <text x={(x1+x2)/2} y={y + 4/zoom} textAnchor="middle" fontSize={11/zoom} fill="white" fontWeight={600}>
-            {Math.round(gapRight.distance)}
-          </text>
-        </g>
-      );
-    }
-    
-    return <>{elements}</>;
-  };
-
-  // Render the ground line (Y=0 reference)
-  const renderGroundLine = () => {
-    if (viewBoxY > 0 || viewBoxY + viewBoxHeight < 0) return null;
-    
+  const renderFloorLine = () => {
+    const screenY = worldToScreenY(0);
+    if (screenY < viewBoxY || screenY > viewBoxY + viewBoxHeight) return null;
     return (
-      <g className="ground-line">
-        <line
-          x1={viewBoxX}
-          y1={0}
-          x2={viewBoxX + viewBoxWidth}
-          y2={0}
-          stroke="#10b981"
-          strokeWidth={2 / zoom}
-          strokeDasharray={`${8/zoom},${4/zoom}`}
-        />
-        <rect
-          x={viewBoxX + 5/zoom}
-          y={-14/zoom}
-          width={60/zoom}
-          height={16/zoom}
-          fill="#10b981"
-          rx={3/zoom}
-        />
-        <text
-          x={viewBoxX + 35/zoom}
-          y={-2/zoom}
-          textAnchor="middle"
-          fontSize={10/zoom}
-          fill="white"
-          fontWeight={600}
-        >
-          Y = 0
-        </text>
+      <g>
+        <line x1={viewBoxX} y1={screenY} x2={viewBoxX + viewBoxWidth} y2={screenY} stroke="#10b981" strokeWidth={2 / zoom} strokeDasharray={`${8/zoom},${4/zoom}`} />
+        <text x={viewBoxX + RULER_SIZE / zoom + 5 / zoom} y={screenY - 5 / zoom} fontSize={11 / zoom} fill="#10b981" fontWeight={600}>Floor (Y=0)</text>
       </g>
     );
   };
 
-  const renderPanel = (panel: Panel, index: number) => {
-    const isSelected = panel.id === selectedPanelId;
+  const renderPanel = (panel: Panel) => {
+    const isSelected = selectedPanelIds.includes(panel.id);
     const woodColor = getWoodColorVariants(settings.woodColor || "#E8D4B8");
-    const x = panel.x;
-    const y = panel.y;
-
-    // Get visible dimensions based on orientation (enlarged for usability)
-    const visible = getVisibleDimensions(panel, settings.thickness);
-    const width = visible.width;
-    const height = visible.height;
-    const actualHeight = visible.actualHeight; // True dimension
+    const trueDims = getTrueDimensions(panel, settings.thickness);
+    const hitArea = getHitArea(panel, settings.thickness);
+    const { width, height } = trueDims;
     const orientation = panel.orientation || "horizontal";
-    const isEnlarged = height > actualHeight; // Check if we enlarged it for display
 
+    // Screen position: panel.y is BOTTOM, so top in world = panel.y + height
+    const screenX = panel.x;
+    const screenY = worldToScreenY(panel.y + height);
     const handleSize = 12 / zoom;
-    const patternId = `wood-${panel.id}`;
-    const grainCount = Math.max(2, Math.floor(width / 80));
-
-    // Determine if grain should be horizontal or vertical based on orientation
-    const isVerticalGrain = orientation === "vertical";
+    
+    // Hit area extends around the true panel for easier clicking
+    const hitX = screenX - hitArea.offsetX;
+    const hitY = screenY - hitArea.offsetY;
 
     return (
-      <g key={panel.id}>
-        {/* Wood grain pattern definition */}
-        <defs>
-          <pattern
-            id={patternId}
-            patternUnits="userSpaceOnUse"
-            width={width}
-            height={height}
-            x={x}
-            y={y}
-          >
-            {/* Base wood color */}
-            <rect width={width} height={height} fill={woodColor.base} />
-
-            {/* Wood grain lines */}
-            {Array.from({ length: grainCount }).map((_, i) => {
-              const lineX =
-                (width / grainCount) * (i + 0.5) + Math.sin(i * 2) * 10;
-              const curve = Math.sin(i * 1.5) * 15;
-              return (
-                <path
-                  key={i}
-                  d={`M ${lineX} 0 Q ${lineX + curve} ${height / 2} ${lineX} ${height}`}
-                  stroke={woodColor.grain}
-                  strokeWidth={2 + Math.random() * 2}
-                  fill="none"
-                  opacity={0.4 + Math.random() * 0.2}
-                />
-              );
-            })}
-
-            {/* Subtle horizontal grain texture */}
-            {Array.from({ length: Math.floor(height / 40) }).map((_, i) => (
-              <line
-                key={`h${i}`}
-                x1={0}
-                y1={i * 40 + Math.random() * 20}
-                x2={width}
-                y2={i * 40 + Math.random() * 20}
-                stroke={woodColor.grain}
-                strokeWidth={1}
-                opacity={0.15}
-              />
-            ))}
-          </pattern>
-        </defs>
-
-        {/* Panel rectangle with wood texture */}
+      <g key={panel.id} data-panel-id={panel.id}>
+        {/* Invisible hit area for easier clicking on thin panels */}
         <rect
-          x={x}
-          y={y}
-          width={width}
-          height={height}
-          fill={`url(#${patternId})`}
-          stroke={isSelected ? "#2563eb" : woodColor.dark}
-          strokeWidth={isSelected ? 4 / zoom : 2 / zoom}
-          rx={3}
-          ry={3}
+          x={hitX} y={hitY} width={hitArea.width} height={hitArea.height}
+          fill="transparent"
           style={{ cursor: spaceHeld || tool === "pan" ? "grab" : "move" }}
-          onMouseDown={(e) => {
-            if (!spaceHeld && tool !== "pan") {
-              handleMouseDown(e, panel, "drag");
-            }
-          }}
+          onMouseDown={(e) => { if (!spaceHeld && tool !== "pan") handleMouseDown(e, panel, "drag"); }}
         />
-
-        {/* Edge highlight (top and left) */}
-        <line
-          x1={x + 2}
-          y1={y + 2}
-          x2={x + width - 2}
-          y2={y + 2}
-          stroke="rgba(255,255,255,0.3)"
-          strokeWidth={2 / zoom}
+        {/* Visible panel at TRUE size */}
+        <rect
+          x={screenX} y={screenY} width={width} height={height}
+          fill={woodColor.base}
+          stroke={isSelected ? "#2563eb" : woodColor.dark}
+          strokeWidth={isSelected ? 3 / zoom : 1.5 / zoom}
+          rx={2} ry={2}
+          pointerEvents="none"
         />
-        <line
-          x1={x + 2}
-          y1={y + 2}
-          x2={x + 2}
-          y2={y + height - 2}
-          stroke="rgba(255,255,255,0.2)"
-          strokeWidth={2 / zoom}
-        />
-
-        {/* Edge shadow (bottom and right) */}
-        <line
-          x1={x + 2}
-          y1={y + height - 2}
-          x2={x + width - 2}
-          y2={y + height - 2}
-          stroke="rgba(0,0,0,0.15)"
-          strokeWidth={2 / zoom}
-        />
-        <line
-          x1={x + width - 2}
-          y1={y + 2}
-          x2={x + width - 2}
-          y2={y + height - 2}
-          stroke="rgba(0,0,0,0.1)"
-          strokeWidth={2 / zoom}
-        />
-
-        {/* Label - adaptive based on panel size */}
-        {width >= 80 && height >= 30 ? (
-          // Standard label for larger panels
-          <>
-            <rect
-              x={x + width / 2 - Math.min(width * 0.4, 100)}
-              y={y + height / 2 - 20}
-              width={Math.min(width * 0.8, 200)}
-              height={height >= 60 ? 40 : 24}
-              fill="rgba(255,255,255,0.9)"
-              rx={4}
-            />
-            <text
-              x={x + width / 2}
-              y={y + height / 2 - (height >= 60 ? 5 : 2)}
-              textAnchor="middle"
-              fontSize={Math.min(16, Math.max(10, Math.min(width, height) / 8))}
-              fill="#1f2937"
-              pointerEvents="none"
-              fontWeight={600}
-            >
-              {panel.label}
-            </text>
-            {height >= 60 && (
-              <text
-                x={x + width / 2}
-                y={y + height / 2 + 12}
-                textAnchor="middle"
-                fontSize={Math.min(12, Math.max(8, width / 16))}
-                fill="#6b7280"
-                pointerEvents="none"
-              >
-                {panel.width} × {panel.height} mm
-              </text>
-            )}
-            {/* Show actual thickness for enlarged panels */}
-            {isEnlarged && (
-              <text
-                x={x + width / 2}
-                y={y + height - 6}
-                textAnchor="middle"
-                fontSize={9}
-                fill="#9333ea"
-                pointerEvents="none"
-              >
-                (actual: {actualHeight}mm)
-              </text>
-            )}
-          </>
-        ) : (
-          // Compact label for thin panels (shelves, sides) - now bigger so show label
-          <>
-            <title>
-              {panel.label}: {panel.width} × {panel.height} mm ({orientation}) - Visual height enlarged for easier selection
-            </title>
-            {/* Background for label */}
-            <rect
-              x={x + width / 2 - 60}
-              y={y + height / 2 - 10}
-              width={120}
-              height={20}
-              fill="rgba(255,255,255,0.9)"
-              rx={3}
-            />
-            <text
-              x={x + width / 2}
-              y={y + height / 2 + 4}
-              textAnchor="middle"
-              fontSize={11}
-              fill="#1f2937"
-              pointerEvents="none"
-              fontWeight={500}
-            >
-              {panel.label} {isEnlarged && `(${actualHeight}mm)`}
-            </text>
-          </>
-        )}
-
-        {/* Orientation indicator for non-back panels */}
-        {orientation !== "back" && (
-          <text
-            x={x + 8}
-            y={y + Math.min(height - 4, 16)}
-            fontSize={10}
-            fill={isSelected ? "#2563eb" : "#888"}
-            pointerEvents="none"
-          >
-            {orientation === "horizontal" ? "═" : "║"}
-          </text>
-        )}
-
-        {/* Quantity badge */}
+        {/* Orientation indicator - small icon in corner */}
+        <text x={screenX + 6 / zoom} y={screenY + 14 / zoom} fontSize={10 / zoom} fill="#888" pointerEvents="none">{orientation === "horizontal" ? "═" : orientation === "vertical" ? "║" : "▢"}</text>
+        
+        {/* Only show resize handles when exactly one panel is selected */}
+        {isSelected && selectedPanelIds.length === 1 && (orientation === "back" ? ["nw", "ne", "sw", "se", "n", "s", "e", "w"] : orientation === "horizontal" ? ["e", "w"] : ["n", "s"]).map((corner) => {
+          let hx = screenX + width / 2 - handleSize / 2, hy = screenY + height / 2 - handleSize / 2;
+          if (corner.includes("e")) hx = screenX + width - handleSize / 2;
+          if (corner.includes("w")) hx = screenX - handleSize / 2;
+          if (corner.includes("n")) hy = screenY - handleSize / 2;
+          if (corner.includes("s")) hy = screenY + height - handleSize / 2;
+          if (corner === "n" || corner === "s") hx = screenX + width / 2 - handleSize / 2;
+          if (corner === "e" || corner === "w") hy = screenY + height / 2 - handleSize / 2;
+          return <rect key={corner} x={hx} y={hy} width={handleSize} height={handleSize} fill="white" stroke="#2563eb" strokeWidth={2 / zoom} rx={2} style={{ cursor: corner.length === 2 ? `${corner}-resize` : corner === "n" || corner === "s" ? "ns-resize" : "ew-resize" }} onMouseDown={(e) => handleMouseDown(e, panel, "resize", corner)} />;
+        })}
+        
         {panel.quantity > 1 && (
           <>
-            <circle
-              cx={x + width - 25}
-              cy={y + 25}
-              r={20}
-              fill="#dc2626"
-              stroke="white"
-              strokeWidth={2 / zoom}
-            />
-            <text
-              x={x + width - 25}
-              y={y + 32}
-              textAnchor="middle"
-              fontSize={16}
-              fill="white"
-              fontWeight={700}
-              pointerEvents="none"
-            >
-              ×{panel.quantity}
-            </text>
-          </>
-        )}
-
-        {/* Resize handles (only when selected) */}
-        {isSelected && (
-          <>
-            {/* For horizontal panels: only width is resizable (e, w handles) */}
-            {/* For vertical panels: only height is resizable (n, s handles) */}
-            {/* For back panels: both width and height are resizable */}
-            {(orientation === "back"
-              ? ["nw", "ne", "sw", "se", "n", "s", "e", "w"]
-              : orientation === "horizontal"
-                ? ["e", "w"] // Only width resizable
-                : ["n", "s"]
-            ) // Only height resizable
-              .map((corner) => {
-                let hx = x + width / 2 - handleSize / 2;
-                let hy = y + height / 2 - handleSize / 2;
-
-                if (corner.includes("e")) hx = x + width - handleSize / 2;
-                if (corner.includes("w")) hx = x - handleSize / 2;
-                if (corner.includes("s")) hy = y + height - handleSize / 2;
-                if (corner.includes("n")) hy = y - handleSize / 2;
-
-                // For edge handles, center them
-                if (corner === "n" || corner === "s")
-                  hx = x + width / 2 - handleSize / 2;
-                if (corner === "e" || corner === "w")
-                  hy = y + height / 2 - handleSize / 2;
-
-                const cursor =
-                  corner.length === 2
-                    ? `${corner}-resize`
-                    : corner === "n" || corner === "s"
-                      ? "ns-resize"
-                      : "ew-resize";
-
-                return (
-                  <rect
-                    key={corner}
-                    x={hx}
-                    y={hy}
-                    width={handleSize}
-                    height={handleSize}
-                    fill="white"
-                    stroke="#2563eb"
-                    strokeWidth={2 / zoom}
-                    rx={2}
-                    style={{ cursor }}
-                    onMouseDown={(e) =>
-                      handleMouseDown(e, panel, "resize", corner)
-                    }
-                  />
-                );
-              })}
+            <circle cx={screenX + width - 16 / zoom} cy={screenY + 16 / zoom} r={12 / zoom} fill="#dc2626" stroke="white" strokeWidth={2 / zoom} />
+            <text x={screenX + width - 16 / zoom} y={screenY + 20 / zoom} textAnchor="middle" fontSize={10 / zoom} fill="white" fontWeight={700}>×{panel.quantity}</text>
           </>
         )}
       </g>
     );
   };
 
-  // Determine cursor based on current state
-  const getCursor = () => {
-    if (isPanning) return "grabbing";
-    if (spaceHeld || tool === "pan") return "grab";
-    return "default";
-  };
-
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden flex flex-col h-full">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200">
-        <div className="flex items-center gap-1">
-          {/* Tool selector */}
-          <div className="flex items-center bg-white rounded border border-gray-200 mr-2">
-            <button
-              onClick={() => setTool("select")}
-              className={`p-1.5 rounded-l transition-colors ${tool === "select" ? "bg-blue-100 text-blue-600" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"}`}
-              title="Select tool (V)"
-            >
-              <MousePointer2 size={16} />
-            </button>
-            <button
-              onClick={() => setTool("pan")}
-              className={`p-1.5 rounded-r transition-colors ${tool === "pan" ? "bg-blue-100 text-blue-600" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"}`}
-              title="Pan tool (H) - or hold Space"
-            >
-              <Hand size={16} />
-            </button>
-          </div>
-
-          <div className="w-px h-6 bg-gray-200 mx-1" />
-
-          {/* Zoom controls */}
-          <button
-            onClick={handleZoomOut}
-            className="p-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-200 rounded transition-colors"
-            title="Zoom out (-)"
-          >
-            <ZoomOut size={18} />
-          </button>
-          <span className="text-sm text-gray-600 min-w-[52px] text-center font-medium">
-            {Math.round(zoom * 100)}%
-          </span>
-          <button
-            onClick={handleZoomIn}
-            className="p-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-200 rounded transition-colors"
-            title="Zoom in (+)"
-          >
-            <ZoomIn size={18} />
-          </button>
-          <button
-            onClick={handleFitToContent}
-            className="p-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-200 rounded transition-colors ml-1"
-            title="Fit to content"
-          >
-            <Maximize size={18} />
-          </button>
-
-          <div className="w-px h-6 bg-gray-200 mx-2" />
-
-          {/* Ruler toggle */}
-          <button
-            onClick={() => setShowRulers(!showRulers)}
-            className={`p-1.5 rounded transition-colors ${showRulers ? "bg-blue-100 text-blue-600" : "text-gray-600 hover:text-gray-800 hover:bg-gray-200"}`}
-            title="Toggle rulers"
-          >
-            <Ruler size={18} />
-          </button>
-        </div>
-
-        {/* Position info panel - shows inverted Y (positive = UP) */}
-        {calculateGaps && (
-          <div className="flex items-center gap-3 text-xs bg-white border border-gray-200 rounded px-2 py-1 shadow-sm">
-            <div className="flex items-center gap-2 border-r border-gray-200 pr-3">
-              <span className="text-gray-500 font-medium">Position</span>
-              <span className="font-mono text-gray-700">
-                ({Math.round(calculateGaps.panel.x)}, {Math.round(-calculateGaps.panel.y)})
-              </span>
-            </div>
-            <div className="flex items-center gap-2 border-r border-gray-200 pr-3">
-              <span className="text-gray-500 font-medium">Size</span>
-              <span className="font-mono text-gray-700">
-                {Math.round(calculateGaps.visible.width)} × {Math.round(calculateGaps.visible.height)} mm
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-gray-500 font-medium">Top edge</span>
-              <span className="font-mono text-gray-700">
-                Y = {Math.round(-calculateGaps.panel.y)}
-              </span>
-            </div>
-            {(calculateGaps.gapAbove || calculateGaps.gapBelow || calculateGaps.gapLeft || calculateGaps.gapRight) && (
-              <>
-                <div className="w-px h-4 bg-gray-300" />
-                <div className="flex items-center gap-2">
-                  <span className="text-purple-600 font-medium">Clearance</span>
-                  <div className="flex items-center gap-1.5">
-                    {calculateGaps.gapAbove && (
-                      <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
-                        ↑ {Math.round(calculateGaps.gapAbove.distance)}mm
-                      </span>
-                    )}
-                    {calculateGaps.gapBelow && (
-                      <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
-                        ↓ {Math.round(calculateGaps.gapBelow.distance)}mm
-                      </span>
-                    )}
-                    {calculateGaps.gapLeft && (
-                      <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
-                        ← {Math.round(calculateGaps.gapLeft.distance)}mm
-                      </span>
-                    )}
-                    {calculateGaps.gapRight && (
-                      <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
-                        → {Math.round(calculateGaps.gapRight.distance)}mm
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        <div className="flex items-center gap-3 text-xs text-gray-400">
-          {clipboard && <span className="text-green-600">📋 Copied</span>}
-          <span className="hidden sm:inline">
-            ⌘C copy • ⌘V paste • ⌘D duplicate • Space+drag pan
-          </span>
-        </div>
-      </div>
-
-      <div ref={containerRef} className="flex-1 overflow-hidden">
-        <svg
-          ref={svgRef}
-          width={canvasSize.width || "100%"}
-          height={canvasSize.height || "100%"}
-          viewBox={`${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          onMouseDown={handleCanvasMouseDown}
-          onClick={handleCanvasClick}
-          style={{ cursor: getCursor() }}
-        >
-          {/* Background that covers entire visible area - click to deselect */}
-          <rect
-            x={viewBoxX - 100}
-            y={viewBoxY - 100}
-            width={viewBoxWidth + 200}
-            height={viewBoxHeight + 200}
-            fill="#f3f4f6"
-            onClick={() => selectPanel(null)}
-            style={{ cursor: "default" }}
-          />
-          {renderGrid()}
-          {panels.map((panel, index) => renderPanel(panel, index))}
-
-          {/* Snap guides */}
-          {snapGuides.map((guide, i) => (
-            <line
-              key={`guide-${i}`}
-              x1={guide.type === "vertical" ? guide.position : guide.start}
-              y1={guide.type === "horizontal" ? guide.position : guide.start}
-              x2={guide.type === "vertical" ? guide.position : guide.end}
-              y2={guide.type === "horizontal" ? guide.position : guide.end}
-              stroke={GUIDE_COLOR}
-              strokeWidth={1 / zoom}
-              strokeDasharray={`${4 / zoom},${4 / zoom}`}
-            />
-          ))}
-
-          {/* Distance indicators */}
-          {distanceIndicators.map((dist, i) => (
-            <g key={`dist-${i}`}>
-              {/* Line between elements */}
-              <line
-                x1={dist.x1}
-                y1={dist.y1}
-                x2={dist.x2}
-                y2={dist.y2}
-                stroke={DISTANCE_COLOR}
-                strokeWidth={1 / zoom}
-              />
-              {/* End caps */}
-              {dist.orientation === "horizontal" ? (
-                <>
-                  <line
-                    x1={dist.x1}
-                    y1={dist.y1 - 6 / zoom}
-                    x2={dist.x1}
-                    y2={dist.y1 + 6 / zoom}
-                    stroke={DISTANCE_COLOR}
-                    strokeWidth={1 / zoom}
-                  />
-                  <line
-                    x1={dist.x2}
-                    y1={dist.y2 - 6 / zoom}
-                    x2={dist.x2}
-                    y2={dist.y2 + 6 / zoom}
-                    stroke={DISTANCE_COLOR}
-                    strokeWidth={1 / zoom}
-                  />
-                </>
-              ) : (
-                <>
-                  <line
-                    x1={dist.x1 - 6 / zoom}
-                    y1={dist.y1}
-                    x2={dist.x1 + 6 / zoom}
-                    y2={dist.y1}
-                    stroke={DISTANCE_COLOR}
-                    strokeWidth={1 / zoom}
-                  />
-                  <line
-                    x1={dist.x2 - 6 / zoom}
-                    y1={dist.y2}
-                    x2={dist.x2 + 6 / zoom}
-                    y2={dist.y2}
-                    stroke={DISTANCE_COLOR}
-                    strokeWidth={1 / zoom}
-                  />
-                </>
-              )}
-              {/* Distance label */}
+  const renderSnapGuides = () => {
+    const renderedGuides: React.ReactNode[] = [];
+    const gapLabels: React.ReactNode[] = [];
+    const seenGaps = new Set<string>();
+    
+    snapGuides.forEach((guide, i) => {
+      const color = guide.isEqualSpacing ? "#10b981" : GUIDE_COLOR; // Green for equal spacing
+      
+      renderedGuides.push(
+        <line
+          key={`guide-${i}`}
+          x1={guide.type === "vertical" ? guide.position : guide.start}
+          y1={guide.type === "horizontal" ? worldToScreenY(guide.position) : worldToScreenY(guide.end)}
+          x2={guide.type === "vertical" ? guide.position : guide.end}
+          y2={guide.type === "horizontal" ? worldToScreenY(guide.position) : worldToScreenY(guide.start)}
+          stroke={color} 
+          strokeWidth={(guide.isEqualSpacing ? 1.5 : 1) / zoom} 
+          strokeDasharray={guide.isEqualSpacing ? "none" : `${4 / zoom},${4 / zoom}`}
+        />
+      );
+      
+      // Show gap measurement for equal spacing (avoid duplicates)
+      if (guide.isEqualSpacing && guide.gapSize !== undefined) {
+        const gapKey = `${guide.type}-${Math.round(guide.gapSize)}`;
+        if (!seenGaps.has(gapKey)) {
+          seenGaps.add(gapKey);
+          const labelX = guide.type === "vertical" ? guide.position + 5 / zoom : viewBoxX + viewBoxWidth / 2;
+          const labelY = guide.type === "horizontal" ? worldToScreenY(guide.position) + 15 / zoom : viewBoxY + 50 / zoom;
+          
+          gapLabels.push(
+            <g key={`gap-label-${i}`}>
               <rect
-                x={(dist.x1 + dist.x2) / 2 - 20 / zoom}
-                y={(dist.y1 + dist.y2) / 2 - 8 / zoom}
-                width={40 / zoom}
+                x={labelX - 2 / zoom}
+                y={labelY - 12 / zoom}
+                width={50 / zoom}
                 height={16 / zoom}
-                fill={DISTANCE_COLOR}
+                fill="#10b981"
                 rx={3 / zoom}
               />
               <text
-                x={(dist.x1 + dist.x2) / 2}
-                y={(dist.y1 + dist.y2) / 2 + 4 / zoom}
-                textAnchor="middle"
+                x={labelX + 23 / zoom}
+                y={labelY - 1 / zoom}
                 fontSize={10 / zoom}
                 fill="white"
+                textAnchor="middle"
                 fontWeight={600}
               >
-                {dist.distance}
+                {Math.round(guide.gapSize)}mm
               </text>
             </g>
-          ))}
+          );
+        }
+      }
+    });
+    
+    return [...renderedGuides, ...gapLabels];
+  };
 
-          {panels.length === 0 && (
-            <text
-              x={viewBoxX + viewBoxWidth / 2}
-              y={viewBoxY + viewBoxHeight / 2}
-              textAnchor="middle"
-              fontSize={16 / zoom}
-              fill="#9ca3af"
+  const renderMarqueeSelection = () => {
+    if (!isMarqueeSelecting || !marqueeStart || !marqueeEnd) return null;
+    const x = Math.min(marqueeStart.x, marqueeEnd.x);
+    const y = Math.min(marqueeStart.y, marqueeEnd.y);
+    const width = Math.abs(marqueeEnd.x - marqueeStart.x);
+    const height = Math.abs(marqueeEnd.y - marqueeStart.y);
+    return (
+      <rect
+        x={x} y={y} width={width} height={height}
+        fill="rgba(37, 99, 235, 0.1)"
+        stroke="#2563eb"
+        strokeWidth={1 / zoom}
+        strokeDasharray={`${4 / zoom},${4 / zoom}`}
+        pointerEvents="none"
+      />
+    );
+  };
+
+  const noteClickRef = useRef<{ noteId: string; timeout: NodeJS.Timeout } | null>(null);
+  
+  const handleNoteMouseDown = useCallback((e: React.MouseEvent, note: StickyNoteType) => {
+    if (editingNote === note.id) return; // Don't drag while editing
+    e.stopPropagation();
+    
+    // Check for double-click manually
+    if (noteClickRef.current?.noteId === note.id) {
+      // This is a double-click
+      clearTimeout(noteClickRef.current.timeout);
+      noteClickRef.current = null;
+      setEditingNote(note.id);
+      setNoteInputValue(note.text);
+      return;
+    }
+    
+    // Single click - start drag after a short delay
+    const timeout = setTimeout(() => {
+      noteClickRef.current = null;
+      setDraggingNote(note.id);
+      setDragStart(getSVGPoint(e));
+      setNoteStart({ x: note.x, y: note.y });
+    }, 200);
+    
+    noteClickRef.current = { noteId: note.id, timeout };
+  }, [getSVGPoint, editingNote]);
+
+  const handleNoteDoubleClick = useCallback((e: React.MouseEvent, note: StickyNoteType) => {
+    e.stopPropagation();
+    // Clear any pending drag
+    if (noteClickRef.current) {
+      clearTimeout(noteClickRef.current.timeout);
+      noteClickRef.current = null;
+    }
+    setEditingNote(note.id);
+    setNoteInputValue(note.text);
+  }, []);
+
+  const handleNoteSave = useCallback(() => {
+    if (editingNote) {
+      updateStickyNote(editingNote, { text: noteInputValue });
+      setEditingNote(null);
+    }
+  }, [editingNote, noteInputValue, updateStickyNote]);
+
+  const handleNoteBlur = useCallback(() => {
+    // Save when clicking away
+    if (editingNote) {
+      updateStickyNote(editingNote, { text: noteInputValue });
+      setEditingNote(null);
+    }
+  }, [editingNote, noteInputValue, updateStickyNote]);
+
+  const renderStickyNotes = () => {
+    const NOTE_WIDTH = 140;
+    const NOTE_HEIGHT = 100;
+    const FONT_SIZE = 12; // Larger text
+    const NOTE_COLOR = "#fef08a"; // Consistent yellow color
+    
+    return stickyNotes.map(note => {
+      const screenX = note.x;
+      const screenY = worldToScreenY(note.y);
+      const isEditing = editingNote === note.id;
+      
+      return (
+        <g key={note.id}>
+          {/* Note shadow */}
+          <rect
+            x={screenX + 3 / zoom}
+            y={screenY + 3 / zoom}
+            width={NOTE_WIDTH / zoom}
+            height={NOTE_HEIGHT / zoom}
+            fill="rgba(0,0,0,0.15)"
+            rx={4 / zoom}
+          />
+          {/* Note background - clickable area */}
+          <rect
+            x={screenX}
+            y={screenY}
+            width={NOTE_WIDTH / zoom}
+            height={NOTE_HEIGHT / zoom}
+            fill={NOTE_COLOR}
+            stroke={isEditing ? "#3b82f6" : "#d97706"}
+            strokeWidth={isEditing ? 2 / zoom : 1 / zoom}
+            rx={4 / zoom}
+            style={{ cursor: isEditing ? "text" : "pointer" }}
+            onMouseDown={(e) => !isEditing && handleNoteMouseDown(e, note)}
+            onDoubleClick={(e) => handleNoteDoubleClick(e, note)}
+          />
+          {/* Delete button - hide when editing */}
+          {!isEditing && (
+            <g
+              style={{ cursor: "pointer" }}
+              onClick={(e) => { e.stopPropagation(); deleteStickyNote(note.id); }}
             >
-              Click "Add Panel" to start designing your furniture
-            </text>
+              <circle
+                cx={screenX + NOTE_WIDTH / zoom - 10 / zoom}
+                cy={screenY + 10 / zoom}
+                r={10 / zoom}
+                fill="rgba(0,0,0,0.1)"
+              />
+              <text
+                x={screenX + NOTE_WIDTH / zoom - 10 / zoom}
+                y={screenY + 14 / zoom}
+                fontSize={12 / zoom}
+                fill="#666"
+                textAnchor="middle"
+              >
+                ×
+              </text>
+            </g>
           )}
+          {/* Note content */}
+          <foreignObject
+            x={screenX + 6 / zoom}
+            y={screenY + 6 / zoom}
+            width={(NOTE_WIDTH - 12) / zoom}
+            height={(NOTE_HEIGHT - 12) / zoom}
+            style={{ pointerEvents: isEditing ? "auto" : "none" }}
+          >
+            {isEditing ? (
+              <textarea
+                value={noteInputValue}
+                onChange={(e) => setNoteInputValue(e.target.value)}
+                onBlur={handleNoteBlur}
+                onMouseDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Escape") {
+                    setEditingNote(null);
+                  }
+                }}
+                autoFocus
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  fontSize: `${FONT_SIZE / zoom}px`,
+                  fontFamily: "system-ui, -apple-system, sans-serif",
+                  color: "#1f2937",
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  resize: "none",
+                  padding: 0,
+                  margin: 0,
+                  lineHeight: 1.4,
+                }}
+                placeholder="Type your note..."
+              />
+            ) : (
+              <div 
+                style={{ 
+                  fontSize: `${FONT_SIZE / zoom}px`, 
+                  fontFamily: "system-ui, -apple-system, sans-serif",
+                  color: "#1f2937",
+                  overflow: "hidden",
+                  wordBreak: "break-word",
+                  lineHeight: 1.4,
+                  height: "100%",
+                }}
+              >
+                {note.text || <span style={{ color: "#92400e", fontStyle: "italic" }}>Double-click to edit...</span>}
+              </div>
+            )}
+          </foreignObject>
+        </g>
+      );
+    });
+  };
 
-          {/* Ground line (Y=0 reference) */}
-          {renderGroundLine()}
+  const getCursor = () => {
+    if (isPanning) return "grabbing";
+    if (spaceHeld || tool === "pan") return "grab";
+    if (stickyNoteTool) return "crosshair";
+    return "default";
+  };
 
-          {/* Gap indicators for selected panel */}
-          {renderSelectedPanelIndicator()}
+  // Calculate measurements between selected panel and neighbors/floor
+  const getMeasurements = useMemo(() => {
+    if (!showMeasurements) return [];
+    
+    const measurements: {
+      id: string;
+      type: "gap" | "position";
+      axis: "x" | "y";
+      direction: "before" | "after" | "floor";
+      value: number;
+      x1: number; y1: number;
+      x2: number; y2: number;
+      labelX: number; labelY: number;
+      panelId: string; // The panel that will move when editing
+      neighborId?: string;
+    }[] = [];
+    
+    // Get all panel bounds
+    const panelBounds = panels.map(p => {
+      const dims = getTrueDimensions(p, settings.thickness);
+      return {
+        id: p.id,
+        left: p.x,
+        right: p.x + dims.width,
+        bottom: p.y,
+        top: p.y + dims.height,
+        centerX: p.x + dims.width / 2,
+        centerY: p.y + dims.height / 2,
+        width: dims.width,
+        height: dims.height,
+      };
+    });
+    
+    // For each panel, find gaps to floor and neighbors
+    panelBounds.forEach(panel => {
+      // Distance to floor
+      if (panel.bottom > 0 && panel.bottom < 2000) {
+        measurements.push({
+          id: `${panel.id}-floor`,
+          type: "gap",
+          axis: "y",
+          direction: "floor",
+          value: panel.bottom,
+          x1: panel.centerX,
+          y1: 0,
+          x2: panel.centerX,
+          y2: panel.bottom,
+          labelX: panel.centerX,
+          labelY: panel.bottom / 2,
+          panelId: panel.id,
+        });
+      }
+      
+      // Find horizontally aligned neighbors (overlapping in Y)
+      const horizontalNeighbors = panelBounds.filter(p => 
+        p.id !== panel.id && p.top > panel.bottom && p.bottom < panel.top
+      );
+      
+      // Gap to panel on the right (only add from left panel's perspective to avoid duplicates)
+      const rightNeighbor = horizontalNeighbors
+        .filter(p => p.left > panel.right)
+        .sort((a, b) => a.left - b.left)[0];
+      
+      if (rightNeighbor) {
+        const gap = rightNeighbor.left - panel.right;
+        if (gap > 0 && gap < 2000) {
+          const avgY = (Math.max(panel.bottom, rightNeighbor.bottom) + Math.min(panel.top, rightNeighbor.top)) / 2;
+          measurements.push({
+            id: `${panel.id}-right-${rightNeighbor.id}`,
+            type: "gap",
+            axis: "x",
+            direction: "after",
+            value: gap,
+            x1: panel.right,
+            y1: avgY,
+            x2: rightNeighbor.left,
+            y2: avgY,
+            labelX: panel.right + gap / 2,
+            labelY: avgY,
+            panelId: rightNeighbor.id, // Right panel moves
+            neighborId: panel.id,
+          });
+        }
+      }
+      
+      // Find vertically aligned neighbors (overlapping in X)
+      const verticalNeighbors = panelBounds.filter(p => 
+        p.id !== panel.id && p.right > panel.left && p.left < panel.right
+      );
+      
+      // Gap to panel above (only add from bottom panel's perspective)
+      const aboveNeighbor = verticalNeighbors
+        .filter(p => p.bottom > panel.top)
+        .sort((a, b) => a.bottom - b.bottom)[0];
+      
+      if (aboveNeighbor) {
+        const gap = aboveNeighbor.bottom - panel.top;
+        if (gap > 0 && gap < 2000) {
+          const avgX = (Math.max(panel.left, aboveNeighbor.left) + Math.min(panel.right, aboveNeighbor.right)) / 2;
+          measurements.push({
+            id: `${panel.id}-above-${aboveNeighbor.id}`,
+            type: "gap",
+            axis: "y",
+            direction: "after",
+            value: gap,
+            x1: avgX,
+            y1: panel.top,
+            x2: avgX,
+            y2: aboveNeighbor.bottom,
+            labelX: avgX,
+            labelY: panel.top + gap / 2,
+            panelId: aboveNeighbor.id, // Top panel moves
+            neighborId: panel.id,
+          });
+        }
+      }
+    });
+    
+    return measurements;
+  }, [showMeasurements, panels, settings.thickness]);
 
-          {/* Rulers - rendered last to be on top */}
+  const handleMeasurementDoubleClick = useCallback((measurement: typeof getMeasurements[0], e: React.MouseEvent) => {
+    e.stopPropagation();
+    const svg = svgRef.current;
+    if (!svg) return;
+    
+    const rect = svg.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    
+    setEditingMeasurement({
+      type: measurement.type,
+      panelId: measurement.panelId,
+      axis: measurement.axis,
+      direction: measurement.direction,
+      currentValue: measurement.value,
+      position: { x: screenX, y: screenY },
+    });
+    setMeasurementInputValue(Math.round(measurement.value).toString());
+  }, []);
+
+  const handleMeasurementSubmit = useCallback(() => {
+    if (!editingMeasurement) return;
+    
+    const newValue = parseFloat(measurementInputValue);
+    if (isNaN(newValue) || newValue < 0) {
+      setEditingMeasurement(null);
+      return;
+    }
+    
+    const panel = panels.find(p => p.id === editingMeasurement.panelId);
+    if (!panel) {
+      setEditingMeasurement(null);
+      return;
+    }
+    
+    saveToHistory();
+    
+    const delta = newValue - editingMeasurement.currentValue;
+    
+    // Movement logic:
+    // - For floor distance: panel moves up/down to reach the new height
+    // - For vertical gaps (between shelves): top panel moves up/down
+    // - For horizontal gaps (between sides): right panel moves left/right
+    
+    if (editingMeasurement.axis === "y") {
+      if (editingMeasurement.direction === "floor") {
+        // Change distance to floor - set absolute position
+        updatePanel(panel.id, { y: newValue });
+      } else {
+        // Gap between panels - move the designated panel (top one)
+        // If gap increases, panel moves up. If gap decreases, panel moves down.
+        updatePanel(panel.id, { y: panel.y + delta });
+      }
+    } else {
+      // Horizontal gap - move the designated panel (right one)
+      // If gap increases, panel moves right. If gap decreases, panel moves left.
+      updatePanel(panel.id, { x: panel.x + delta });
+    }
+    
+    setEditingMeasurement(null);
+  }, [editingMeasurement, measurementInputValue, panels, updatePanel, saveToHistory]);
+
+  const renderMeasurements = () => {
+    if (!showMeasurements) return null;
+    
+    const labelWidth = 50 / zoom;
+    const labelHeight = 20 / zoom;
+    
+    // First pass: calculate initial label positions
+    const labelPositions = getMeasurements.map((m, index) => {
+      const screenLabelY = worldToScreenY(m.labelY);
+      const isVertical = m.axis === "y";
+      const isFloor = m.direction === "floor";
+      
+      let x = m.labelX;
+      let y = screenLabelY;
+      
+      // For floor measurements, alternate left/right based on index
+      if (isFloor) {
+        const floorIndex = getMeasurements.filter((mm, i) => i < index && mm.direction === "floor").length;
+        x = m.x1 + (floorIndex % 2 === 0 ? 25 / zoom : -25 / zoom);
+      } else if (isVertical) {
+        // Vertical gaps: offset right from the line
+        x = m.x1 + 35 / zoom;
+      }
+      // Horizontal gaps: keep label centered on the line
+      
+      return { m, x, y, index };
+    });
+    
+    // Second pass: detect and resolve overlaps
+    const resolvedPositions = [...labelPositions];
+    const padding = 8 / zoom;
+    
+    for (let i = 0; i < resolvedPositions.length; i++) {
+      for (let j = i + 1; j < resolvedPositions.length; j++) {
+        const a = resolvedPositions[i];
+        const b = resolvedPositions[j];
+        
+        // Check if labels overlap
+        const overlapX = Math.abs(a.x - b.x) < labelWidth + padding;
+        const overlapY = Math.abs(a.y - b.y) < labelHeight + padding;
+        
+        if (overlapX && overlapY) {
+          // Push them apart
+          if (a.m.axis === b.m.axis) {
+            // Same axis - offset perpendicular to the measurement
+            if (a.m.axis === "y") {
+              // Vertical measurements - spread horizontally
+              b.x += (labelWidth + padding);
+            } else {
+              // Horizontal measurements - spread vertically
+              b.y -= (labelHeight + padding);
+            }
+          } else {
+            // Different axes - offset the later one
+            b.y -= (labelHeight + padding);
+          }
+        }
+      }
+    }
+    
+    return resolvedPositions.map(({ m, x: adjustedLabelX, y: adjustedLabelY }) => {
+      const screenY1 = worldToScreenY(m.y1);
+      const screenY2 = worldToScreenY(m.y2);
+      const isVertical = m.axis === "y";
+      
+      // Check if this measurement is relevant to a selected panel
+      const isRelevant = selectedPanelIds.includes(m.panelId) || 
+        (m.neighborId && selectedPanelIds.includes(m.neighborId));
+      const opacity = isRelevant ? 1 : 0.35;
+      
+      return (
+        <g key={m.id} style={{ opacity }}>
+          {/* Measurement line */}
+          <line
+            x1={m.x1}
+            y1={screenY1}
+            x2={m.x2}
+            y2={screenY2}
+            stroke={DISTANCE_COLOR}
+            strokeWidth={1.5 / zoom}
+            strokeDasharray={`${3 / zoom},${3 / zoom}`}
+          />
+          {/* End caps */}
+          {isVertical ? (
+            <>
+              <line x1={m.x1 - 6 / zoom} y1={screenY1} x2={m.x1 + 6 / zoom} y2={screenY1} stroke={DISTANCE_COLOR} strokeWidth={1.5 / zoom} />
+              <line x1={m.x2 - 6 / zoom} y1={screenY2} x2={m.x2 + 6 / zoom} y2={screenY2} stroke={DISTANCE_COLOR} strokeWidth={1.5 / zoom} />
+            </>
+          ) : (
+            <>
+              <line x1={m.x1} y1={screenY1 - 6 / zoom} x2={m.x1} y2={screenY1 + 6 / zoom} stroke={DISTANCE_COLOR} strokeWidth={1.5 / zoom} />
+              <line x1={m.x2} y1={screenY2 - 6 / zoom} x2={m.x2} y2={screenY2 + 6 / zoom} stroke={DISTANCE_COLOR} strokeWidth={1.5 / zoom} />
+            </>
+          )}
+          {/* Leader line to label if offset significantly */}
+          {Math.abs(adjustedLabelX - m.labelX) > 30 / zoom || Math.abs(adjustedLabelY - worldToScreenY(m.labelY)) > 30 / zoom ? (
+            <line
+              x1={m.labelX}
+              y1={worldToScreenY(m.labelY)}
+              x2={adjustedLabelX}
+              y2={adjustedLabelY}
+              stroke={DISTANCE_COLOR}
+              strokeWidth={0.5 / zoom}
+              opacity={0.5}
+            />
+          ) : null}
+          {/* Label background (clickable) */}
+          <rect
+            x={adjustedLabelX - 25 / zoom}
+            y={adjustedLabelY - 10 / zoom}
+            width={labelWidth}
+            height={labelHeight}
+            fill={DISTANCE_COLOR}
+            rx={4 / zoom}
+            style={{ cursor: "pointer" }}
+            onDoubleClick={(e) => handleMeasurementDoubleClick(m, e)}
+          />
+          {/* Label text */}
+          <text
+            x={adjustedLabelX}
+            y={adjustedLabelY + 4 / zoom}
+            fontSize={11 / zoom}
+            fill="white"
+            textAnchor="middle"
+            fontWeight={600}
+            style={{ pointerEvents: "none" }}
+          >
+            {Math.round(m.value)}
+          </text>
+        </g>
+      );
+    });
+  };
+
+  // ===========================================================================
+  // RENDER
+  // ===========================================================================
+  
+  return (
+    <div className="relative w-full h-full overflow-hidden bg-slate-50">
+      {/* Floating Dark Toolbar */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-2 py-1.5 bg-slate-800 rounded-xl shadow-lg">
+        <div className="flex items-center bg-slate-700 rounded-lg p-0.5">
+          <button onClick={() => setTool("select")} className={`p-1.5 rounded-md transition-colors ${tool === "select" ? "bg-white text-slate-800" : "text-slate-300 hover:text-white"}`} title="Select (V)"><MousePointer2 size={16} /></button>
+          <button onClick={() => setTool("pan")} className={`p-1.5 rounded-md transition-colors ${tool === "pan" ? "bg-white text-slate-800" : "text-slate-300 hover:text-white"}`} title="Pan (H)"><Hand size={16} /></button>
+        </div>
+        <div className="w-px h-5 bg-slate-600 mx-1" />
+        <button onClick={undo} disabled={!canUndo} className={`p-1.5 rounded-md transition-colors ${canUndo ? "text-slate-300 hover:text-white hover:bg-slate-700" : "text-slate-600 cursor-not-allowed"}`} title="Undo (⌘Z)"><Undo2 size={16} /></button>
+        <button onClick={redo} disabled={!canRedo} className={`p-1.5 rounded-md transition-colors ${canRedo ? "text-slate-300 hover:text-white hover:bg-slate-700" : "text-slate-600 cursor-not-allowed"}`} title="Redo (⌘⇧Z)"><Redo2 size={16} /></button>
+        <div className="w-px h-5 bg-slate-600 mx-1" />
+        <button onClick={handleZoomOut} className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded-md transition-colors"><ZoomOut size={16} /></button>
+        <span className="text-xs text-slate-300 w-10 text-center font-mono">{Math.round(zoom * 100)}%</span>
+        <button onClick={handleZoomIn} className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded-md transition-colors"><ZoomIn size={16} /></button>
+        <button onClick={handleFitToContent} className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded-md transition-colors" title="Fit (F)"><Maximize size={16} /></button>
+        <div className="w-px h-5 bg-slate-600 mx-1" />
+        <button onClick={() => setShowRulers(!showRulers)} className={`p-1.5 rounded-md transition-colors ${showRulers ? "bg-slate-600 text-white" : "text-slate-300 hover:text-white hover:bg-slate-700"}`} title="Rulers (R)"><Ruler size={16} /></button>
+        <button onClick={() => setShowMeasurements(!showMeasurements)} className={`p-1.5 rounded-md transition-colors ${showMeasurements ? "bg-blue-500 text-white" : "text-slate-300 hover:text-white hover:bg-slate-700"}`} title="Measurements (M)"><Move size={16} /></button>
+        <button onClick={() => setStickyNoteTool(!stickyNoteTool)} className={`p-1.5 rounded-md transition-colors ${stickyNoteTool ? "bg-yellow-400 text-slate-800" : "text-slate-300 hover:text-white hover:bg-slate-700"}`} title="Add Note (N)"><StickyNote size={16} /></button>
+        <div className="w-px h-5 bg-slate-600 mx-1" />
+        <button onClick={() => setShowPrintView(true)} className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded-md transition-colors" title="Print Plans (P)"><Printer size={16} /></button>
+      </div>
+
+      {/* Measurement Input Overlay */}
+      {editingMeasurement && (
+        <div 
+          className="absolute z-30"
+          style={{ 
+            left: editingMeasurement.position.x - 40, 
+            top: editingMeasurement.position.y - 15 
+          }}
+        >
+          <div className="flex items-center gap-1 bg-white rounded-lg shadow-xl border border-slate-200 p-1">
+            <input
+              type="number"
+              value={measurementInputValue}
+              onChange={(e) => setMeasurementInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleMeasurementSubmit();
+                if (e.key === "Escape") setEditingMeasurement(null);
+              }}
+              autoFocus
+              className="w-20 px-2 py-1 text-sm border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="mm"
+            />
+            <button
+              onClick={handleMeasurementSubmit}
+              className="px-2 py-1 bg-blue-500 text-white text-xs font-medium rounded hover:bg-blue-600"
+            >
+              Set
+            </button>
+            <button
+              onClick={() => setEditingMeasurement(null)}
+              className="px-2 py-1 text-slate-500 text-xs hover:text-slate-700"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="text-[10px] text-slate-500 mt-1 text-center">
+            {editingMeasurement.direction === "floor" ? "Distance to floor" : 
+             editingMeasurement.axis === "x" ? 
+               (editingMeasurement.direction === "before" ? "Gap to left" : "Gap to right") :
+               (editingMeasurement.direction === "before" ? "Gap below" : "Gap above")}
+          </div>
+        </div>
+      )}
+
+      {/* Sticky Note Tool Hint */}
+      {stickyNoteTool && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 bg-yellow-100 text-yellow-800 text-sm px-3 py-1.5 rounded-lg shadow-lg border border-yellow-300">
+          Click anywhere to place a sticky note
+        </div>
+      )}
+
+      {/* Status Bar - Bottom Left */}
+      {calculateGaps && (
+        <div className="absolute bottom-4 left-4 z-20 text-xs bg-slate-800 text-slate-300 rounded-lg px-3 py-1.5 shadow-lg font-mono">
+          <span className="text-slate-500">x:</span>{Math.round(calculateGaps.panel.x)} <span className="text-slate-500">y:</span>{Math.round(calculateGaps.panel.y)}
+          <span className="mx-2 text-slate-600">|</span>
+          <span className="text-slate-500">w:</span>{Math.round(calculateGaps.visible.width)} <span className="text-slate-500">h:</span>{Math.round(calculateGaps.visible.height)}
+        </div>
+      )}
+
+      {/* Modifier Hints - Bottom Center */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2">
+        {dragging && shiftHeld && <span className="text-xs bg-blue-500 text-white px-2 py-1 rounded-lg shadow-lg">⇧ Constrain</span>}
+        {dragging && ctrlHeld && <span className="text-xs bg-orange-500 text-white px-2 py-1 rounded-lg shadow-lg">⌘ Free Move</span>}
+        {hasDuplicatedOnDrag && <span className="text-xs bg-green-500 text-white px-2 py-1 rounded-lg shadow-lg">⌥ Duplicated</span>}
+        {snapGuides.some(g => g.isEqualSpacing) && <span className="text-xs bg-emerald-500 text-white px-2 py-1 rounded-lg shadow-lg">↔ Equal Spacing</span>}
+      </div>
+
+      {/* Keyboard Hints - Bottom Right */}
+      {!dragging && !resizing && (
+        <div className="absolute bottom-4 right-4 z-20 text-[10px] text-slate-400 bg-white/80 backdrop-blur rounded-lg px-2 py-1 shadow">
+          <span className="text-slate-500">⇧</span> straight · <span className="text-slate-500">⌥</span> copy · <span className="text-slate-500">⌘</span> no-snap
+        </div>
+      )}
+
+      {/* Canvas */}
+      <div ref={containerRef} className="w-full h-full">
+        <svg ref={svgRef} width={canvasSize.width || "100%"} height={canvasSize.height || "100%"} viewBox={`${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onMouseDown={handleCanvasMouseDown} onClick={handleCanvasClick} style={{ cursor: getCursor() }}>
+          <rect x={viewBoxX - 1000} y={viewBoxY - 1000} width={viewBoxWidth + 2000} height={viewBoxHeight + 2000} fill="#f1f5f9" onClick={() => clearSelection()} />
+          {renderGrid()}
+          {renderFloorLine()}
+          {panels.map(renderPanel)}
+          {renderSnapGuides()}
+          {renderMeasurements()}
+          {renderStickyNotes()}
+          {renderMarqueeSelection()}
+          {panels.length === 0 && stickyNotes.length === 0 && <text x={viewBoxX + viewBoxWidth / 2} y={viewBoxY + viewBoxHeight / 2} textAnchor="middle" fontSize={16 / zoom} fill="#94a3b8">Click "Add Panel" to start designing</text>}
           {renderVerticalRuler()}
           {renderHorizontalRuler()}
-          
-          {/* Ruler corner box */}
-          {showRulers && (
-            <rect
-              x={viewBoxX}
-              y={viewBoxY}
-              width={RULER_SIZE / zoom}
-              height={RULER_SIZE / zoom}
-              fill="rgba(255,255,255,0.95)"
-            />
-          )}
+          {showRulers && <rect x={viewBoxX} y={viewBoxY} width={RULER_SIZE / zoom} height={RULER_SIZE / zoom} fill="rgba(241,245,249,0.95)" />}
         </svg>
       </div>
+      
+      {/* Print View Modal */}
+      {showPrintView && <PrintView onClose={() => setShowPrintView(false)} />}
     </div>
   );
 }

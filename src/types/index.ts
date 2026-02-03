@@ -4,6 +4,9 @@
 // - 'back': Back panel - faces forward, you see the full face in front view
 export type PanelOrientation = "horizontal" | "vertical" | "back";
 
+// Z-axis alignment for panels with depth less than furniture depth
+export type ZAlignment = "front" | "back" | "center";
+
 export interface Panel {
   id: string;
   label: string;
@@ -13,6 +16,8 @@ export interface Panel {
   height: number; // Panel's actual height/length
   quantity: number;
   orientation: PanelOrientation;
+  depth?: number; // Custom depth (Z dimension), defaults to furniture depth (400mm)
+  zAlign?: ZAlignment; // Where to position panel in Z-axis when depth < furniture depth
 }
 
 export interface Settings {
@@ -21,6 +26,8 @@ export interface Settings {
   sheetHeight: number;
   units: "mm" | "inches";
   woodColor: string;
+  furnitureDepth: number; // Default depth for panels (typically 400mm)
+  projectName?: string; // Name of the project for print cover page
 }
 
 export interface DesignData {
@@ -45,6 +52,14 @@ export interface Sheet {
   placements: Placement[];
   usedArea: number;
   wastePercent: number;
+}
+
+export interface StickyNote {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+  color: string;
 }
 
 export interface OptimizationResult {

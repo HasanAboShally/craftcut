@@ -259,3 +259,83 @@ export function calculateCutList(panels: Panel[]): {
 
   return { pieces, totalPieces, totalArea };
 }
+
+/**
+ * Calculate cut list grouped by actual cut dimensions
+ * This is what you'd take to the lumber yard - panels with identical cut sizes are bundled
+ */
+export function calculateGroupedCutList(
+  panels: Panel[],
+  thickness: number,
+  furnitureDepth: number
+): {
+  pieces: {
+    length: number;
+    width: number;
+    thickness: number;
+    qty: number;
+    area: number;
+  }[];
+  totalPieces: number;
+  totalArea: number;
+} {
+  const rawPieces: { length: number; width: number; thickness: number }[] = [];
+  
+  // Convert each panel to its actual cut piece dimensions
+  panels.forEach(p => {
+    const orientation = p.orientation || "horizontal";
+    const panelDepth = p.depth || furnitureDepth;
+    let length: number, width: number;
+    
+    switch (orientation) {
+      case "horizontal": // Shelf: depth goes into the furniture
+        length = p.width;
+        width = panelDepth;
+        break;
+      case "vertical": // Side panel: height is the length, depth goes into furniture
+        length = p.height;
+        width = panelDepth;
+        break;
+      case "back": // Back panel: faces forward
+        length = p.width;
+        width = p.height;
+        break;
+      default:
+        length = p.width;
+        width = panelDepth;
+    }
+    
+    // Normalize: always have length >= width
+    if (width > length) {
+      [length, width] = [width, length];
+    }
+    
+    rawPieces.push({ length, width, thickness });
+  });
+  
+  // Group by dimensions
+  const grouped = new Map<string, { length: number; width: number; thickness: number; qty: number }>();
+  
+  rawPieces.forEach(piece => {
+    const key = `${piece.length}x${piece.width}x${piece.thickness}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.qty += 1;
+    } else {
+      grouped.set(key, { ...piece, qty: 1 });
+    }
+  });
+  
+  // Convert to array with area calculation and sort by size (largest first)
+  const pieces = Array.from(grouped.values())
+    .map(p => ({
+      ...p,
+      area: (p.length * p.width * p.qty) / 1000000, // Convert to m²
+    }))
+    .sort((a, b) => (b.length * b.width) - (a.length * a.width));
+  
+  const totalPieces = pieces.reduce((sum, p) => sum + p.qty, 0);
+  const totalArea = pieces.reduce((sum, p) => sum + p.area, 0);
+  
+  return { pieces, totalPieces, totalArea };
+}

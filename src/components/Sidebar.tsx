@@ -1,5 +1,5 @@
 import { useDesignStore } from "../stores/designStore";
-import type { PanelOrientation } from "../types";
+import type { PanelOrientation, ZAlignment } from "../types";
 
 const THICKNESS_OPTIONS = [12, 15, 18, 19, 25];
 const SHEET_PRESETS = [
@@ -30,27 +30,55 @@ const ORIENTATION_OPTIONS: {
   },
 ];
 
+const Z_ALIGN_OPTIONS: {
+  value: ZAlignment;
+  label: string;
+}[] = [
+  { value: "front", label: "Front" },
+  { value: "back", label: "Back" },
+  { value: "center", label: "Center" },
+];
+
 export default function Sidebar() {
   const {
     panels,
-    selectedPanelId,
+    selectedPanelIds,
     settings,
     updatePanel,
     deletePanel,
+    deletePanels,
     updateSettings,
   } = useDesignStore();
 
-  const selectedPanel = panels.find((p) => p.id === selectedPanelId);
+  // If exactly one panel is selected, show its properties
+  const selectedPanel = selectedPanelIds.length === 1 
+    ? panels.find((p) => p.id === selectedPanelIds[0]) 
+    : null;
+  
+  // Multiple panels selected
+  const multipleSelected = selectedPanelIds.length > 1;
 
   return (
-    <div className="w-72 bg-white border-l border-gray-200 p-4 flex flex-col gap-6 overflow-y-auto">
+    <div className="w-full h-full bg-white p-4 flex flex-col gap-5 overflow-y-auto">
       {/* Panel Properties */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">
-          {selectedPanel ? "Panel Properties" : "Select a Panel"}
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+          {selectedPanel ? "Panel Properties" : multipleSelected ? `${selectedPanelIds.length} Panels Selected` : "Select a Panel"}
         </h3>
 
-        {selectedPanel ? (
+        {multipleSelected ? (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-500">
+              {selectedPanelIds.length} panels selected. Use arrow keys to move them together, or Cmd+D to duplicate.
+            </p>
+            <button
+              onClick={() => deletePanels(selectedPanelIds)}
+              className="w-full px-3 py-2 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors"
+            >
+              Delete {selectedPanelIds.length} Panels
+            </button>
+          </div>
+        ) : selectedPanel ? (
           <div className="space-y-3">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Label</label>
@@ -64,40 +92,178 @@ export default function Sidebar() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  Width (mm)
-                </label>
-                <input
-                  type="number"
-                  min={10}
-                  value={selectedPanel.width}
-                  onChange={(e) =>
-                    updatePanel(selectedPanel.id, {
-                      width: parseInt(e.target.value) || 10,
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  Height (mm)
-                </label>
-                <input
-                  type="number"
-                  min={10}
-                  value={selectedPanel.height}
-                  onChange={(e) =>
-                    updatePanel(selectedPanel.id, {
-                      height: parseInt(e.target.value) || 10,
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Type
+              </label>
+              <select
+                value={selectedPanel.orientation || "horizontal"}
+                onChange={(e) =>
+                  updatePanel(selectedPanel.id, {
+                    orientation: e.target.value as PanelOrientation,
+                  })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {ORIENTATION_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </div>
+
+            {/* Dimensions - context-sensitive based on orientation */}
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+              <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-3">
+                Dimensions
+              </h4>
+              
+              {(selectedPanel.orientation || "horizontal") === "horizontal" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">
+                      Width (mm)
+                    </label>
+                    <input
+                      type="number"
+                      min={10}
+                      value={selectedPanel.width}
+                      onChange={(e) =>
+                        updatePanel(selectedPanel.id, {
+                          width: parseInt(e.target.value) || 10,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">
+                      Depth (mm)
+                    </label>
+                    <input
+                      key={`depth-h-${selectedPanel.id}`}
+                      type="number"
+                      min={10}
+                      value={selectedPanel.depth ?? settings.furnitureDepth ?? 400}
+                      onChange={(e) =>
+                        updatePanel(selectedPanel.id, {
+                          depth: parseInt(e.target.value) || settings.furnitureDepth || 400,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {(selectedPanel.orientation || "horizontal") === "vertical" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">
+                      Height (mm)
+                    </label>
+                    <input
+                      type="number"
+                      min={10}
+                      value={selectedPanel.height}
+                      onChange={(e) =>
+                        updatePanel(selectedPanel.id, {
+                          height: parseInt(e.target.value) || 10,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">
+                      Depth (mm)
+                    </label>
+                    <input
+                      key={`depth-v-${selectedPanel.id}`}
+                      type="number"
+                      min={10}
+                      value={selectedPanel.depth ?? settings.furnitureDepth ?? 400}
+                      onChange={(e) =>
+                        updatePanel(selectedPanel.id, {
+                          depth: parseInt(e.target.value) || settings.furnitureDepth || 400,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {selectedPanel.orientation === "back" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">
+                      Width (mm)
+                    </label>
+                    <input
+                      type="number"
+                      min={10}
+                      value={selectedPanel.width}
+                      onChange={(e) =>
+                        updatePanel(selectedPanel.id, {
+                          width: parseInt(e.target.value) || 10,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">
+                      Height (mm)
+                    </label>
+                    <input
+                      type="number"
+                      min={10}
+                      value={selectedPanel.height}
+                      onChange={(e) =>
+                        updatePanel(selectedPanel.id, {
+                          height: parseInt(e.target.value) || 10,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-gray-400 mt-2">
+                Thickness: {settings.thickness}mm (from material settings)
+              </p>
+            </div>
+
+            {/* Z-alignment - only for horizontal/vertical with custom depth */}
+            {(selectedPanel.orientation || "horizontal") !== "back" && 
+             selectedPanel.depth && 
+             selectedPanel.depth < settings.furnitureDepth && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  Depth Position
+                </label>
+                <div className="flex gap-1">
+                  {Z_ALIGN_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() =>
+                        updatePanel(selectedPanel.id, { zAlign: opt.value })
+                      }
+                      className={`flex-1 px-2 py-1.5 text-xs rounded border transition-colors ${
+                        (selectedPanel.zAlign || "front") === opt.value
+                          ? "bg-blue-100 border-blue-300 text-blue-700"
+                          : "border-gray-300 text-gray-600 hover:bg-gray-100"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Position inputs */}
             <div className="grid grid-cols-2 gap-3">
@@ -118,66 +284,19 @@ export default function Sidebar() {
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">
-                  Y Position (mm) <span className="text-gray-400">↑+</span>
+                  Y Position (mm)
                 </label>
                 <input
                   type="number"
-                  value={Math.round(-selectedPanel.y)}
+                  value={Math.round(selectedPanel.y)}
                   onChange={(e) =>
                     updatePanel(selectedPanel.id, {
-                      y: -(parseInt(e.target.value) || 0),
+                      y: parseInt(e.target.value) || 0,
                     })
                   }
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
                 />
               </div>
-            </div>
-
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Quantity
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={selectedPanel.quantity}
-                onChange={(e) =>
-                  updatePanel(selectedPanel.id, {
-                    quantity: Math.max(1, parseInt(e.target.value) || 1),
-                  })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Orientation
-              </label>
-              <select
-                value={selectedPanel.orientation || "horizontal"}
-                onChange={(e) =>
-                  updatePanel(selectedPanel.id, {
-                    orientation: e.target.value as PanelOrientation,
-                  })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {ORIENTATION_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-gray-400 mt-1">
-                {
-                  ORIENTATION_OPTIONS.find(
-                    (o) =>
-                      o.value === (selectedPanel.orientation || "horizontal"),
-                  )?.description
-                }
-              </p>
             </div>
 
             <button
@@ -222,6 +341,38 @@ export default function Sidebar() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">
+              Project Name
+            </label>
+            <input
+              type="text"
+              value={settings.projectName || ""}
+              onChange={(e) => updateSettings({ projectName: e.target.value })}
+              placeholder="My Bookshelf"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="text-xs text-gray-400 mt-1">Appears on print cover page</p>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">
+              Furniture Depth (mm)
+            </label>
+            <input
+              type="number"
+              min={100}
+              max={1000}
+              step={10}
+              value={settings.furnitureDepth || 400}
+              onChange={(e) =>
+                updateSettings({ furnitureDepth: parseInt(e.target.value) || 400 })
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="text-xs text-gray-400 mt-1">Default depth for all panels</p>
           </div>
 
           <div>
