@@ -4,10 +4,14 @@ import {
   Printer,
   Package,
   Wrench,
+  FileDown,
+  DollarSign,
+  Loader2,
 } from "lucide-react";
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { generateAssemblySteps, getAssemblySummary } from "../lib/assembly";
-import { calculateGroupedCutList } from "../lib/optimizer";
+import { calculateGroupedCutList, optimizeCuts } from "../lib/optimizer";
+import { exportToPDF } from "../lib/pdf";
 import { useDesignStore } from "../stores/designStore";
 import type { Panel } from "../types";
 import AssemblyIllustration from "./AssemblyIllustration";
@@ -98,6 +102,7 @@ function getTrueDimensions(
 export default function ProductionView() {
   const { panels, settings, exportDesign } = useDesignStore();
   const contentRef = useRef<HTMLDivElement>(null);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
 
   // Calculate bounds
   const bounds = useMemo(() => {
@@ -227,6 +232,50 @@ export default function ProductionView() {
     window.print();
   };
 
+  const handleExportPDF = async () => {
+    if (!contentRef.current || isExportingPDF) return;
+    
+    setIsExportingPDF(true);
+    try {
+      const filename = `${settings.projectName || 'craftcut'}-production.pdf`;
+      await exportToPDF(contentRef.current, filename, {
+        title: settings.projectName || 'CraftCut Production Documents',
+        orientation: 'portrait',
+        margin: 10,
+      });
+    } catch (error) {
+      console.error('Failed to export PDF:', error);
+    } finally {
+      setIsExportingPDF(false);
+    }
+  };
+
+  // Calculate material cost
+  const costEstimate = useMemo(() => {
+    const result = optimizeCuts(
+      panels,
+      settings.sheetWidth,
+      settings.sheetHeight,
+      settings.furnitureDepth || 400,
+      dimensionToLetter
+    );
+    
+    const sheetPrice = settings.sheetPrice || 0;
+    const currency = settings.currency || '$';
+    const totalSheets = result.totalSheets;
+    const totalCost = totalSheets * sheetPrice;
+    const wastePercent = result.totalWaste;
+    
+    return {
+      totalSheets,
+      sheetPrice,
+      totalCost,
+      wastePercent,
+      currency,
+      hasPrice: sheetPrice > 0,
+    };
+  }, [panels, settings, dimensionToLetter]);
+
   // Inject print styles
   useEffect(() => {
     const styleId = "production-print-styles";
@@ -277,6 +326,7 @@ export default function ProductionView() {
           <button
             onClick={handleExportCSV}
             className="flex items-center gap-2 px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            title="Export cut list as CSV"
           >
             <FileText size={16} />
             CSV
@@ -284,13 +334,28 @@ export default function ProductionView() {
           <button
             onClick={handleExportJSON}
             className="flex items-center gap-2 px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            title="Export project as JSON"
           >
             <Download size={16} />
             JSON
           </button>
           <button
+            onClick={handleExportPDF}
+            disabled={isExportingPDF}
+            className="flex items-center gap-2 px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+            title="Export as PDF"
+          >
+            {isExportingPDF ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <FileDown size={16} />
+            )}
+            PDF
+          </button>
+          <button
             onClick={handlePrint}
             className="flex items-center gap-2 px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            title="Print production documents"
           >
             <Printer size={16} />
             Print
@@ -363,11 +428,57 @@ export default function ProductionView() {
                       <span className="text-gray-500">Estimated Time</span>
                       <span className="font-semibold">{assemblySummary.estimatedTime}</span>
                     </div>
+                    <div className="flex items-center justify-between text-sm mt-2">
+                      <span className="text-gray-500">Sheets Required</span>
+                      <span className="font-semibold">{costEstimate.totalSheets}</span>
+                    </div>
+                    {costEstimate.hasPrice && (
+                      <div className="flex items-center justify-between text-sm mt-2 pt-2 border-t border-gray-100">
+                        <span className="text-gray-500">Estimated Cost</span>
+                        <span className="font-bold text-green-600">
+                          {costEstimate.currency}{costEstimate.totalCost.toFixed(2)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
           </section>
+
+          {/* Cost Summary - only show if price is set */}
+          {costEstimate.hasPrice && (
+            <section className="production-section bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg border border-green-200 overflow-hidden">
+              <div className="p-4">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center">
+                    <DollarSign className="text-white" size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-800">Material Cost Estimate</h3>
+                    <p className="text-sm text-gray-500">Based on sheet price</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-white rounded-lg p-3 border border-green-100">
+                    <div className="text-sm text-gray-500">Sheets</div>
+                    <div className="text-xl font-bold text-gray-900">{costEstimate.totalSheets}</div>
+                  </div>
+                  <div className="bg-white rounded-lg p-3 border border-green-100">
+                    <div className="text-sm text-gray-500">Price/Sheet</div>
+                    <div className="text-xl font-bold text-gray-900">{costEstimate.currency}{costEstimate.sheetPrice}</div>
+                  </div>
+                  <div className="bg-white rounded-lg p-3 border border-green-100">
+                    <div className="text-sm text-gray-500">Total Cost</div>
+                    <div className="text-xl font-bold text-green-600">{costEstimate.currency}{costEstimate.totalCost.toFixed(2)}</div>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 mt-3">
+                  * Material waste: {costEstimate.wastePercent}% • Set sheet price in Settings to see cost estimates
+                </p>
+              </div>
+            </section>
+          )}
 
           {/* Section 2: Parts List */}
           <section className="production-section bg-white rounded-lg border border-gray-200 overflow-hidden">

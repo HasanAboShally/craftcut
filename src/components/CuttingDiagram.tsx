@@ -1,12 +1,12 @@
 import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
-import { useMemo } from "react";
+import React, { memo, useMemo } from "react";
 import { calculateGroupedCutList, getPanelLetter, optimizeCuts } from "../lib/optimizer";
 import { useDesignStore } from "../stores/designStore";
 
 const DIAGRAM_WIDTH = 520;
 const DIAGRAM_HEIGHT = 260;
 
-export default function CuttingDiagram() {
+const CuttingDiagram = memo(function CuttingDiagram() {
   const { panels, settings } = useDesignStore();
 
   // Get dimension-to-letter mapping (sorted by size, A = largest)
@@ -270,4 +270,6 @@ export default function CuttingDiagram() {
       </div>
     </div>
   );
-}
+});
+
+export default CuttingDiagram;

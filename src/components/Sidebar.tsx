@@ -513,6 +513,38 @@ export default function Sidebar() {
               </select>
             </div>
           </div>
+
+          {/* Cost Settings */}
+          <div className="pt-3 border-t border-gray-200 mt-3">
+            <label className="block text-xs text-gray-500 mb-1">
+              Sheet Price (for cost estimates)
+            </label>
+            <div className="flex gap-2">
+              <select
+                value={settings.currency || "$"}
+                onChange={(e) => updateSettings({ currency: e.target.value })}
+                className="w-16 px-2 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="$">$</option>
+                <option value="€">€</option>
+                <option value="£">£</option>
+                <option value="¥">¥</option>
+                <option value="₹">₹</option>
+              </select>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                value={settings.sheetPrice || ""}
+                onChange={(e) => updateSettings({ sheetPrice: parseFloat(e.target.value) || 0 })}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Set price per sheet to see cost estimates
+            </p>
+          </div>
         </div>
       </div>
 

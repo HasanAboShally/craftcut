@@ -28,6 +28,9 @@ export interface Settings {
   woodColor: string;
   furnitureDepth: number; // Default depth for panels (typically 400mm)
   projectName?: string; // Name of the project for print cover page
+  // Cost calculation
+  sheetPrice?: number; // Price per sheet in local currency
+  currency?: string; // Currency symbol (default: $)
 }
 
 export interface DesignData {

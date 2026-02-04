@@ -13,17 +13,31 @@ import {
   Undo2,
   Upload,
 } from "lucide-react";
-import React, { useEffect, useRef, useState } from "react";
+import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { exportToCSV, exportToJSON, importFromJSON } from "../lib/export";
 import { calculateCutList } from "../lib/optimizer";
 import { useDesignStore } from "../stores/designStore";
 import { useProjectsStore } from "../stores/projectsStore";
 import Canvas from "./Canvas";
-import ProductionView from "./ProductionView";
-import Preview3D from "./Preview3D";
 import Sidebar from "./Sidebar";
 import { ErrorBoundary, KeyboardHelp, ToastProvider, useConfirm, useKeyboardHelp, useToast } from "./ui";
+
+// Lazy load heavy components
+const Preview3D = lazy(() => import("./Preview3D"));
+const ProductionView = lazy(() => import("./ProductionView"));
+
+// Loading skeleton for lazy components
+function LoadingSkeleton({ label }: { label: string }) {
+  return (
+    <div className="h-full flex items-center justify-center bg-gray-50">
+      <div className="text-center">
+        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="text-gray-500">Loading {label}...</p>
+      </div>
+    </div>
+  );
+}
 
 type ViewTab = "design" | "3d" | "production";
 
@@ -346,10 +360,16 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
           {activeTab === "design" && <Canvas />}
           {activeTab === "3d" && (
             <ErrorBoundary fallbackMessage="WebGL may not be supported in your browser. Try Chrome or Firefox for the best experience.">
-              <Preview3D />
+              <Suspense fallback={<LoadingSkeleton label="3D Preview" />}>
+                <Preview3D />
+              </Suspense>
             </ErrorBoundary>
           )}
-          {activeTab === "production" && <ProductionView />}
+          {activeTab === "production" && (
+            <Suspense fallback={<LoadingSkeleton label="Production Documents" />}>
+              <ProductionView />
+            </Suspense>
+          )}
         </div>
 
         {/* Collapsible Sidebar - Hidden in production view */}
