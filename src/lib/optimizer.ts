@@ -73,13 +73,14 @@ function sortPieces(pieces: Piece[], strategy: SortStrategy): Piece[] {
 
 /**
  * Advanced bin-packing with multiple strategies - picks the best result
+ * @param dimensionToLetter - Map from "length x width" key to letter (A, B, C...)
  */
 export function optimizeCuts(
   panels: Panel[],
   sheetWidth: number,
   sheetHeight: number,
   furnitureDepth: number = 400,
-  letterLabels?: Map<string, string>,
+  dimensionToLetter?: Map<string, string>,
 ): OptimizationResult {
   if (panels.length === 0) {
     return {
@@ -94,7 +95,12 @@ export function optimizeCuts(
   const pieces: Piece[] = [];
   for (const panel of panels) {
     const { cutWidth, cutHeight } = getCutDimensions(panel, furnitureDepth);
-    const letter = letterLabels?.get(panel.id) || "?";
+    
+    // Get letter based on dimensions (normalized)
+    const w = Math.max(cutWidth, cutHeight);
+    const h = Math.min(cutWidth, cutHeight);
+    const dimKey = `${w}x${h}`;
+    const letter = dimensionToLetter?.get(dimKey) || "?";
     
     for (let i = 0; i < panel.quantity; i++) {
       // Normalize so width >= height (standard convention for cuts)
@@ -400,12 +406,12 @@ export function calculateCutList(panels: Panel[]): {
 /**
  * Calculate cut list grouped by actual cut dimensions
  * This is what you'd take to the lumber yard - panels with identical cut sizes are bundled
+ * Letters are assigned by size (A = largest piece)
  */
 export function calculateGroupedCutList(
   panels: Panel[],
   thickness: number,
   furnitureDepth: number,
-  letterLabels?: Map<string, string>,
 ): {
   pieces: {
     letter: string;
@@ -417,11 +423,12 @@ export function calculateGroupedCutList(
   }[];
   totalPieces: number;
   totalArea: number;
+  dimensionToLetter: Map<string, string>; // Export for use in cutting diagrams
 } {
   // Group panels by their cut dimensions first, then merge
   const dimensionGroups = new Map<
     string,
-    { letter: string; length: number; width: number; thickness: number; qty: number }
+    { length: number; width: number; thickness: number; qty: number }
   >();
 
   // Convert each panel to its actual cut piece dimensions and group
@@ -453,27 +460,81 @@ export function calculateGroupedCutList(
       [length, width] = [width, length];
     }
 
-    const key = `${length}x${width}x${thickness}`;
-    const letter = letterLabels?.get(p.id) || "?";
+    const key = `${length}x${width}`;
     const existing = dimensionGroups.get(key);
     
     if (existing) {
       existing.qty += p.quantity;
     } else {
-      dimensionGroups.set(key, { letter, length, width, thickness, qty: p.quantity });
+      dimensionGroups.set(key, { length, width, thickness, qty: p.quantity });
     }
   });
 
-  // Convert to array with area calculation and sort by size (largest first)
-  const pieces = Array.from(dimensionGroups.values())
-    .map((p) => ({
+  // Convert to array and sort by area (largest first)
+  const sortedPieces = Array.from(dimensionGroups.entries())
+    .map(([key, p]) => ({
+      key,
       ...p,
       area: (p.length * p.width * p.qty) / 1000000, // Convert to m²
     }))
-    .sort((a, b) => b.length * b.width - a.length * a.width);
+    .sort((a, b) => (b.length * b.width) - (a.length * a.width));
+
+  // Assign letters based on size order (A = largest)
+  const dimensionToLetter = new Map<string, string>();
+  const pieces = sortedPieces.map((p, idx) => {
+    const letter = String.fromCharCode(65 + idx); // A, B, C...
+    dimensionToLetter.set(p.key, letter);
+    return {
+      letter,
+      length: p.length,
+      width: p.width,
+      thickness: p.thickness,
+      qty: p.qty,
+      area: p.area,
+    };
+  });
 
   const totalPieces = pieces.reduce((sum, p) => sum + p.qty, 0);
   const totalArea = pieces.reduce((sum, p) => sum + p.area, 0);
 
-  return { pieces, totalPieces, totalArea };
+  return { pieces, totalPieces, totalArea, dimensionToLetter };
+}
+
+/**
+ * Get letter label for a panel based on its cut dimensions
+ */
+export function getPanelLetter(
+  panel: Panel,
+  furnitureDepth: number,
+  dimensionToLetter: Map<string, string>,
+): string {
+  const orientation = panel.orientation || "horizontal";
+  const panelDepth = panel.depth || furnitureDepth;
+  let length: number, width: number;
+
+  switch (orientation) {
+    case "horizontal":
+      length = panel.width;
+      width = panelDepth;
+      break;
+    case "vertical":
+      length = panel.height;
+      width = panelDepth;
+      break;
+    case "back":
+      length = panel.width;
+      width = panel.height;
+      break;
+    default:
+      length = panel.width;
+      width = panelDepth;
+  }
+
+  // Normalize
+  if (width > length) {
+    [length, width] = [width, length];
+  }
+
+  const key = `${length}x${width}`;
+  return dimensionToLetter.get(key) || "?";
 }

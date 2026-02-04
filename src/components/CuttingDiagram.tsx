@@ -1,7 +1,6 @@
 import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { useMemo } from "react";
-import { generateAssemblySteps } from "../lib/assembly";
-import { optimizeCuts } from "../lib/optimizer";
+import { calculateGroupedCutList, getPanelLetter, optimizeCuts } from "../lib/optimizer";
 import { useDesignStore } from "../stores/designStore";
 
 const DIAGRAM_WIDTH = 520;
@@ -10,15 +9,14 @@ const DIAGRAM_HEIGHT = 260;
 export default function CuttingDiagram() {
   const { panels, settings } = useDesignStore();
 
-  // Get letter labels from assembly steps
-  const letterLabels = useMemo(() => {
-    const steps = generateAssemblySteps(panels, settings);
-    const labels = new Map<string, string>();
-    steps.forEach((step) => {
-      labels.set(step.panelId, step.letterLabel);
-    });
-    return labels;
-  }, [panels, settings]);
+  // Get dimension-to-letter mapping (sorted by size, A = largest)
+  const { dimensionToLetter } = useMemo(() => {
+    return calculateGroupedCutList(
+      panels,
+      settings.thickness,
+      settings.furnitureDepth || 400,
+    );
+  }, [panels, settings.thickness, settings.furnitureDepth]);
 
   const result = useMemo(() => {
     return optimizeCuts(
@@ -26,9 +24,9 @@ export default function CuttingDiagram() {
       settings.sheetWidth, 
       settings.sheetHeight, 
       settings.furnitureDepth || 400,
-      letterLabels
+      dimensionToLetter
     );
-  }, [panels, settings.sheetWidth, settings.sheetHeight, settings.furnitureDepth, letterLabels]);
+  }, [panels, settings.sheetWidth, settings.sheetHeight, settings.furnitureDepth, dimensionToLetter]);
 
   if (panels.length === 0) {
     return (
@@ -87,7 +85,7 @@ export default function CuttingDiagram() {
               Some pieces are too large for the sheet
             </p>
             <p className="text-amber-700 mt-1">
-              {result.unplacedPieces.map((p) => letterLabels.get(p.id) || p.label).join(", ")} won't fit
+              {result.unplacedPieces.map((p) => getPanelLetter(p, settings.furnitureDepth || 400, dimensionToLetter)).join(", ")} won't fit
               on a {settings.sheetWidth}×{settings.sheetHeight}mm sheet. Consider using larger sheets.
             </p>
           </div>

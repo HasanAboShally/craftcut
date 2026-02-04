@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import React, { useEffect, useMemo, useRef } from "react";
 import { generateAssemblySteps, getAssemblySummary } from "../lib/assembly";
+import { calculateGroupedCutList } from "../lib/optimizer";
 import { useDesignStore } from "../stores/designStore";
 import type { Panel } from "../types";
 import AssemblyIllustration from "./AssemblyIllustration";
@@ -135,14 +136,52 @@ export default function ProductionView() {
     return getAssemblySummary(assemblySteps);
   }, [assemblySteps]);
 
-  // Create letter labels map
+  // Get grouped cut list (sorted by size, A = largest)
+  const { pieces: groupedPieces, dimensionToLetter } = useMemo(() => {
+    return calculateGroupedCutList(
+      panels,
+      settings.thickness,
+      settings.furnitureDepth || 400,
+    );
+  }, [panels, settings.thickness, settings.furnitureDepth]);
+
+  // Create letter labels map based on dimensions (for assembly illustrations)
   const panelLetters = useMemo(() => {
     const map = new Map<string, string>();
-    assemblySteps.forEach((step) => {
-      map.set(step.panelId, step.letterLabel);
+    panels.forEach((panel) => {
+      const orientation = panel.orientation || "horizontal";
+      const panelDepth = panel.depth || settings.furnitureDepth || 400;
+      let length: number, width: number;
+
+      switch (orientation) {
+        case "horizontal":
+          length = panel.width;
+          width = panelDepth;
+          break;
+        case "vertical":
+          length = panel.height;
+          width = panelDepth;
+          break;
+        case "back":
+          length = panel.width;
+          width = panel.height;
+          break;
+        default:
+          length = panel.width;
+          width = panelDepth;
+      }
+
+      // Normalize
+      if (width > length) {
+        [length, width] = [width, length];
+      }
+
+      const key = `${length}x${width}`;
+      const letter = dimensionToLetter.get(key) || "?";
+      map.set(panel.id, letter);
     });
     return map;
-  }, [assemblySteps]);
+  }, [panels, settings.furnitureDepth, dimensionToLetter]);
 
   const handleExportJSON = () => {
     const data = exportDesign();
@@ -337,58 +376,45 @@ export default function ProductionView() {
                 <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">2</span>
                 Parts List
               </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Grouped by dimensions • Sorted by size (A = largest)
+              </p>
             </div>
             <div className="p-4">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-100">
-                    <th className="px-3 py-2 text-left font-semibold">ID</th>
-                    <th className="px-3 py-2 text-left font-semibold">Type</th>
+                    <th className="px-3 py-2 text-center font-semibold">Part</th>
                     <th className="px-3 py-2 text-right font-semibold">Length</th>
                     <th className="px-3 py-2 text-right font-semibold">Width</th>
                     <th className="px-3 py-2 text-right font-semibold">Thickness</th>
                     <th className="px-3 py-2 text-center font-semibold">Qty</th>
+                    <th className="px-3 py-2 text-right font-semibold">Area</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {assemblySteps.map((step, idx) => {
-                    const panel = panels.find(p => p.id === step.panelId);
-                    if (!panel) return null;
-                    const orientation = panel.orientation || "horizontal";
-                    const furnitureDepth = panel.depth || settings.furnitureDepth || 400;
-                    
-                    let length: number, width: number;
-                    if (orientation === "horizontal") {
-                      length = panel.width;
-                      width = furnitureDepth;
-                    } else if (orientation === "vertical") {
-                      length = panel.height;
-                      width = furnitureDepth;
-                    } else {
-                      length = Math.max(panel.width, panel.height);
-                      width = Math.min(panel.width, panel.height);
-                    }
-                    
-                    const typeLabel = orientation === "vertical" ? "Side/Divider" 
-                      : orientation === "back" ? "Back" 
-                      : "Shelf";
-                    
-                    return (
-                      <tr key={panel.id} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                        <td className="px-3 py-2">
-                          <span className="inline-flex items-center justify-center w-6 h-6 bg-blue-600 text-white text-xs font-bold rounded">
-                            {step.letterLabel}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-gray-700">{typeLabel}</td>
-                        <td className="px-3 py-2 text-right font-mono">{Math.round(length)}</td>
-                        <td className="px-3 py-2 text-right font-mono">{Math.round(width)}</td>
-                        <td className="px-3 py-2 text-right font-mono">{settings.thickness}</td>
-                        <td className="px-3 py-2 text-center">{panel.quantity || 1}</td>
-                      </tr>
-                    );
-                  })}
+                  {groupedPieces.map((piece, idx) => (
+                    <tr key={piece.letter} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                      <td className="px-3 py-2 text-center">
+                        <span className="inline-flex items-center justify-center w-7 h-7 bg-blue-600 text-white text-sm font-bold rounded">
+                          {piece.letter}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">{piece.length} mm</td>
+                      <td className="px-3 py-2 text-right font-mono">{piece.width} mm</td>
+                      <td className="px-3 py-2 text-right font-mono">{piece.thickness} mm</td>
+                      <td className="px-3 py-2 text-center font-semibold">{piece.qty}</td>
+                      <td className="px-3 py-2 text-right text-gray-600">{piece.area.toFixed(2)} m²</td>
+                    </tr>
+                  ))}
                 </tbody>
+                <tfoot>
+                  <tr className="bg-gray-100 font-semibold">
+                    <td colSpan={4} className="px-3 py-2 text-right">Total:</td>
+                    <td className="px-3 py-2 text-center">{groupedPieces.reduce((sum, p) => sum + p.qty, 0)}</td>
+                    <td className="px-3 py-2 text-right">{groupedPieces.reduce((sum, p) => sum + p.area, 0).toFixed(2)} m²</td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </section>

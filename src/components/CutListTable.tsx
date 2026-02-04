@@ -1,5 +1,3 @@
-import { useMemo } from "react";
-import { generateAssemblySteps } from "../lib/assembly";
 import { calculateGroupedCutList } from "../lib/optimizer";
 import { useDesignStore } from "../stores/designStore";
 
@@ -12,21 +10,10 @@ export default function CutListTable({
 }: CutListTableProps) {
   const { panels, settings } = useDesignStore();
   
-  // Get letter labels from assembly steps (same logic as CuttingDiagram)
-  const letterLabels = useMemo(() => {
-    const steps = generateAssemblySteps(panels, settings);
-    const labels = new Map<string, string>();
-    steps.forEach((step) => {
-      labels.set(step.panelId, step.letterLabel);
-    });
-    return labels;
-  }, [panels, settings]);
-  
   const { pieces, totalPieces, totalArea } = calculateGroupedCutList(
     panels,
     settings.thickness,
     settings.furnitureDepth || 400,
-    letterLabels,
   );
 
   if (panels.length === 0) {
