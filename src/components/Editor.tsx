@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { useTheme } from "../hooks/useTheme";
 import { exportToCSV, exportToJSON, importFromJSON } from "../lib/export";
 import { calculateCutList } from "../lib/optimizer";
 import { useDesignStore } from "../stores/designStore";
@@ -23,10 +24,12 @@ import { useProjectsStore } from "../stores/projectsStore";
 import Canvas from "./Canvas";
 import Sidebar from "./Sidebar";
 import { ErrorBoundary, KeyboardHelp, ToastProvider, Tooltip, useConfirm, useKeyboardHelp, useToast } from "./ui";
+import { ThemeToggle } from "./ui/ThemeToggle";
 
 // Lazy load heavy components
 const Preview3D = lazy(() => import("./Preview3D"));
 const ProductionView = lazy(() => import("./ProductionView"));
+const PrintBooklet = lazy(() => import("./PrintBooklet"));
 
 // Loading skeleton for lazy components
 function LoadingSkeleton({ label }: { label: string }) {
@@ -52,6 +55,7 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [showPrintBooklet, setShowPrintBooklet] = useState(false);
   const { addPanel, clearAll, panels, settings, exportDesign, loadDesign, saveProject, undo, redo, canUndo, canRedo } =
     useDesignStore();
   const { updateProject, getProject } = useProjectsStore();
@@ -143,9 +147,8 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
   };
 
   const handlePrint = () => {
-    window.print();
     setShowExportMenu(false);
-    toast.info("Print dialog opened", "Use your browser's print settings");
+    setShowPrintBooklet(true);
   };
 
   const handleGoBack = () => {
@@ -166,10 +169,17 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
   ];
 
   return (
-    <div className="h-screen flex flex-col bg-slate-100 overflow-hidden">
+    <div className="h-screen flex flex-col bg-slate-100 dark:bg-slate-900 overflow-hidden">
       {/* Modals */}
       {ConfirmDialog}
       <KeyboardHelp isOpen={keyboardHelp.isOpen} onClose={keyboardHelp.close} />
+      
+      {/* Print Booklet */}
+      {showPrintBooklet && (
+        <Suspense fallback={<LoadingSkeleton label="Print Preview" />}>
+          <PrintBooklet onClose={() => setShowPrintBooklet(false)} />
+        </Suspense>
+      )}
       
       {/* Compact Header */}
       <header className="h-12 bg-slate-900 text-white flex items-center justify-between px-3 flex-shrink-0 z-50" role="banner">
@@ -325,6 +335,8 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
           </Tooltip>
 
           <div className="h-6 w-px bg-slate-700 mx-1" aria-hidden="true" />
+
+          <ThemeToggle />
 
           <Tooltip content="Keyboard shortcuts (?)">
             <button

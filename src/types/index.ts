@@ -70,6 +70,7 @@ export interface Settings {
   edgeBandingPrice?: number; // Price per meter
   // View options
   show3DLabels?: boolean; // Show panel labels in 3D view
+  theme?: "light" | "dark" | "system"; // Color theme
 }
 
 export interface DesignData {

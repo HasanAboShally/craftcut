@@ -1,6 +1,38 @@
 @import "tailwindcss";
 
 /* ============================================
+   Dark Mode Theme Variables
+   ============================================ */
+
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8fafc;
+  --bg-tertiary: #f1f5f9;
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --border-color: #e2e8f0;
+  --accent-color: #3b82f6;
+}
+
+.dark {
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #64748b;
+  --border-color: #334155;
+  --accent-color: #60a5fa;
+}
+
+/* Apply theme colors */
+.dark body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* ============================================
    Custom Animations
    ============================================ */
 
@@ -189,5 +221,22 @@
 @media screen {
   .page-break {
     display: none;
+  }
+}
+
+/* Print booklet specific styles */
+@media print {
+  body.print-booklet-open > *:not(.fixed) {
+    display: none !important;
+  }
+  
+  body.print-booklet-open .fixed {
+    position: static !important;
+    overflow: visible !important;
+  }
+  
+  body.print-booklet-open .fixed > div {
+    max-width: none !important;
+    padding: 0 !important;
   }
 }

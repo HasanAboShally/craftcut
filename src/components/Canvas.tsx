@@ -7,6 +7,7 @@ import {
   Move,
   Redo2,
   Ruler,
+  RulerIcon,
   Square,
   StickyNote,
   Undo2,
@@ -216,7 +217,7 @@ export default function Canvas() {
   const [altHeld, setAltHeld] = useState(false);
   const [ctrlHeld, setCtrlHeld] = useState(false);
   const [clipboard, setClipboard] = useState<Panel[]>([]);
-  const [tool, setTool] = useState<"select" | "pan">("select");
+  const [tool, setTool] = useState<"select" | "pan" | "measure">("select");
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const [showRulers, setShowRulers] = useState(true);
   const [showMeasurements, setShowMeasurements] = useState(false);
@@ -233,6 +234,10 @@ export default function Canvas() {
     "free",
   );
   const [hasDuplicatedOnDrag, setHasDuplicatedOnDrag] = useState(false);
+  
+  // Custom measurement tool state
+  const [measurePoints, setMeasurePoints] = useState<{ x: number; y: number }[]>([]);
+  const [measurePreview, setMeasurePreview] = useState<{ x: number; y: number } | null>(null);
 
   // Marquee selection
   const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
@@ -954,6 +959,14 @@ export default function Canvas() {
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
+      // Handle measure tool preview
+      if (tool === "measure" && measurePoints.length === 1) {
+        const point = getSVGPoint(e);
+        const worldPoint = screenToWorld(point.x, point.y);
+        setMeasurePreview({ x: worldPoint.x, y: worldPoint.y });
+        return;
+      }
+      
       // Handle sticky note dragging
       if (draggingNote) {
         const point = getSVGPoint(e);
@@ -1182,6 +1195,8 @@ export default function Canvas() {
       draggingNote,
       noteStart,
       updateStickyNote,
+      tool,
+      measurePoints,
     ],
   );
 
@@ -1224,6 +1239,25 @@ export default function Canvas() {
 
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent) => {
+      // If measure tool is active, add measurement point
+      if (tool === "measure") {
+        const point = getSVGPoint(e);
+        const worldPoint = screenToWorld(point.x, point.y);
+        
+        if (measurePoints.length === 0) {
+          // First click - set start point
+          setMeasurePoints([{ x: worldPoint.x, y: worldPoint.y }]);
+        } else if (measurePoints.length === 1) {
+          // Second click - complete the measurement
+          setMeasurePoints([measurePoints[0], { x: worldPoint.x, y: worldPoint.y }]);
+          setMeasurePreview(null);
+        } else {
+          // Third click - start new measurement
+          setMeasurePoints([{ x: worldPoint.x, y: worldPoint.y }]);
+        }
+        return;
+      }
+      
       // If sticky note tool is active, add a new note
       if (stickyNoteTool) {
         const point = getSVGPoint(e);
@@ -1234,7 +1268,7 @@ export default function Canvas() {
       }
       if (e.target === svgRef.current) selectPanel(null);
     },
-    [selectPanel, stickyNoteTool, getSVGPoint, screenToWorld, addStickyNote],
+    [selectPanel, stickyNoteTool, tool, measurePoints, getSVGPoint, screenToWorld, addStickyNote],
   );
 
   // Auto-stretch panel to fit between adjacent panels of opposite orientation
@@ -1690,9 +1724,20 @@ export default function Canvas() {
       if (e.key === "f") handleFitToContent();
       if (e.key === "v") setTool("select");
       if (e.key === "h") setTool("pan");
+      if (e.key === "d" && !e.metaKey && !e.ctrlKey) {
+        setTool(tool === "measure" ? "select" : "measure");
+        if (tool === "measure") {
+          setMeasurePoints([]);
+          setMeasurePreview(null);
+        }
+      }
       if (e.key === "r") setShowRulers((r) => !r);
       if (e.key === "m") setShowMeasurements((m) => !m);
       if (e.key === "n") setStickyNoteTool((n) => !n);
+      if (e.key === "Escape" && tool === "measure") {
+        setMeasurePoints([]);
+        setMeasurePreview(null);
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === "c") {
         e.preventDefault();
         handleCopy();
@@ -2677,6 +2722,7 @@ export default function Canvas() {
     if (isPanning) return "grabbing";
     if (spaceHeld || tool === "pan") return "grab";
     if (stickyNoteTool) return "crosshair";
+    if (tool === "measure") return "crosshair";
     return "default";
   };
 
@@ -3051,6 +3097,127 @@ export default function Canvas() {
     );
   };
 
+  // Render custom measure tool line
+  const renderMeasureTool = () => {
+    if (tool !== "measure") return null;
+    
+    const lineWidth = 2 / zoom;
+    const dotRadius = 5 / zoom;
+    const fontSize = 12 / zoom;
+    const labelPadding = 6 / zoom;
+    
+    // Calculate end point (either second click or preview)
+    const startPoint = measurePoints[0];
+    const endPoint = measurePoints[1] || measurePreview;
+    
+    if (!startPoint) return null;
+    
+    // Convert to screen Y
+    const startScreenY = worldToScreenY(startPoint.y);
+    const endScreenY = endPoint ? worldToScreenY(endPoint.y) : startScreenY;
+    
+    // Calculate distance
+    const distance = endPoint 
+      ? Math.sqrt(
+          Math.pow(endPoint.x - startPoint.x, 2) + 
+          Math.pow(endPoint.y - startPoint.y, 2)
+        )
+      : 0;
+    
+    // Calculate horizontal and vertical components
+    const deltaX = endPoint ? Math.abs(endPoint.x - startPoint.x) : 0;
+    const deltaY = endPoint ? Math.abs(endPoint.y - startPoint.y) : 0;
+    
+    // Label position (midpoint)
+    const labelX = endPoint ? (startPoint.x + endPoint.x) / 2 : startPoint.x;
+    const labelY = endPoint ? (startScreenY + endScreenY) / 2 : startScreenY;
+    
+    return (
+      <g className="measure-tool">
+        {/* Start point */}
+        <circle
+          cx={startPoint.x}
+          cy={startScreenY}
+          r={dotRadius}
+          fill="#10b981"
+          stroke="white"
+          strokeWidth={2 / zoom}
+        />
+        
+        {/* Line to end point or preview */}
+        {endPoint && (
+          <>
+            <line
+              x1={startPoint.x}
+              y1={startScreenY}
+              x2={endPoint.x}
+              y2={endScreenY}
+              stroke="#10b981"
+              strokeWidth={lineWidth}
+              strokeDasharray={measurePoints.length < 2 ? `${5 / zoom} ${3 / zoom}` : "none"}
+            />
+            
+            {/* End point */}
+            <circle
+              cx={endPoint.x}
+              cy={endScreenY}
+              r={dotRadius}
+              fill={measurePoints.length < 2 ? "#10b981" : "#10b981"}
+              stroke="white"
+              strokeWidth={2 / zoom}
+              opacity={measurePoints.length < 2 ? 0.7 : 1}
+            />
+            
+            {/* Distance label */}
+            <g transform={`translate(${labelX}, ${labelY})`}>
+              <rect
+                x={-40 / zoom}
+                y={-24 / zoom}
+                width={80 / zoom}
+                height={measurePoints.length === 2 ? 44 / zoom : 20 / zoom}
+                fill="#10b981"
+                rx={4 / zoom}
+              />
+              <text
+                x={0}
+                y={-8 / zoom}
+                fontSize={fontSize}
+                fill="white"
+                textAnchor="middle"
+                fontWeight={600}
+              >
+                {Math.round(distance)} mm
+              </text>
+              {measurePoints.length === 2 && (deltaX > 10 || deltaY > 10) && (
+                <text
+                  x={0}
+                  y={10 / zoom}
+                  fontSize={fontSize * 0.85}
+                  fill="rgba(255,255,255,0.8)"
+                  textAnchor="middle"
+                >
+                  {Math.round(deltaX)}×{Math.round(deltaY)}
+                </text>
+              )}
+            </g>
+          </>
+        )}
+        
+        {/* Instructions */}
+        {measurePoints.length === 0 && (
+          <text
+            x={startPoint.x + 15 / zoom}
+            y={startScreenY}
+            fontSize={fontSize}
+            fill="#10b981"
+          >
+            Click to start measuring
+          </text>
+        )}
+      </g>
+    );
+  };
+
   // ===========================================================================
   // RENDER
   // ===========================================================================
@@ -3101,6 +3268,21 @@ export default function Canvas() {
             title="Pan (H)"
           >
             <Hand size={16} />
+          </button>
+          <button
+            onClick={() => {
+              if (tool === "measure") {
+                setTool("select");
+                setMeasurePoints([]);
+                setMeasurePreview(null);
+              } else {
+                setTool("measure");
+              }
+            }}
+            className={`p-1.5 rounded-md transition-colors ${tool === "measure" ? "bg-green-500 text-white" : "text-slate-300 hover:text-white"}`}
+            title="Measure Distance (D)"
+          >
+            <RulerIcon size={16} />
           </button>
         </div>
         <div className="w-px h-5 bg-slate-600 mx-1" />
@@ -3362,6 +3544,7 @@ export default function Canvas() {
           {renderSelectionBounds()}
           {renderSnapGuides()}
           {renderMeasurements()}
+          {renderMeasureTool()}
           {renderStickyNotes()}
           {renderMarqueeSelection()}
           {panels.length === 0 && stickyNotes.length === 0 && (
