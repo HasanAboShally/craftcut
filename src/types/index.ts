@@ -15,6 +15,9 @@ export interface EdgeBanding {
   right: boolean;
 }
 
+// Grain direction for wood panels - affects cutting optimization
+export type GrainDirection = "horizontal" | "vertical" | "none";
+
 export interface Panel {
   id: string;
   label: string;
@@ -27,6 +30,7 @@ export interface Panel {
   depth?: number; // Custom depth (Z dimension), defaults to furniture depth (400mm)
   zAlign?: ZAlignment; // Where to position panel in Z-axis when depth < furniture depth
   edgeBanding?: EdgeBanding; // Which edges have banding
+  grainDirection?: GrainDirection; // Wood grain direction (affects cutting)
 }
 
 // Material presets
@@ -64,6 +68,8 @@ export interface Settings {
   materialType?: MaterialType;
   // Edge banding
   edgeBandingPrice?: number; // Price per meter
+  // View options
+  show3DLabels?: boolean; // Show panel labels in 3D view
 }
 
 export interface DesignData {
@@ -82,6 +88,7 @@ export interface Placement {
   height: number;
   rotated: boolean;
   sourceId: string;
+  grainDirection?: GrainDirection; // Grain direction from source panel
 }
 
 export interface Sheet {

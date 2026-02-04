@@ -247,6 +247,20 @@ const CuttingDiagram = memo(function CuttingDiagram() {
                             </text>
                           </g>
                         )}
+                        
+                        {/* Grain direction indicator */}
+                        {placement.grainDirection && placement.grainDirection !== "none" && w > 35 && h > 25 && (
+                          <g transform={`translate(${x + w - 22}, ${y + h - 14})`}>
+                            <text
+                              fontSize={10}
+                              fill="#8b7355"
+                              fontFamily="system-ui, sans-serif"
+                              title={`Grain: ${placement.grainDirection}`}
+                            >
+                              {placement.grainDirection === "horizontal" ? "═══" : "║"}
+                            </text>
+                          </g>
+                        )}
                       </g>
                     );
                   })}

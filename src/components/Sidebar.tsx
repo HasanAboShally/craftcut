@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useDesignStore } from "../stores/designStore";
-import type { EdgeBanding, PanelOrientation, ZAlignment, MATERIAL_PRESETS, MaterialType } from "../types";
+import type { EdgeBanding, PanelOrientation, ZAlignment, MaterialType, GrainDirection } from "../types";
 
 const THICKNESS_OPTIONS = [12, 15, 18, 19, 25];
 const SHEET_PRESETS = [
@@ -409,6 +409,36 @@ export default function Sidebar() {
               </div>
               <p className="text-xs text-gray-400 mt-1">
                 Select edges that need banding
+              </p>
+            </div>
+
+            {/* Grain Direction */}
+            <div>
+              <label className="block text-xs text-gray-500 mb-2">
+                Grain Direction
+              </label>
+              <div className="flex gap-2">
+                {[
+                  { value: "none", label: "None", icon: "○" },
+                  { value: "horizontal", label: "Horizontal", icon: "↔" },
+                  { value: "vertical", label: "Vertical", icon: "↕" },
+                ].map(({ value, label, icon }) => (
+                  <button
+                    key={value}
+                    onClick={() => updatePanel(selectedPanel.id, { grainDirection: value as GrainDirection })}
+                    className={`flex-1 px-2 py-1.5 text-xs rounded border transition-colors ${
+                      (selectedPanel.grainDirection || "none") === value
+                        ? "bg-blue-50 border-blue-300 text-blue-700"
+                        : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    <span className="block text-base">{icon}</span>
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Constrains rotation during cutting optimization
               </p>
             </div>
 

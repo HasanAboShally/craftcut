@@ -1,6 +1,6 @@
-import { OrbitControls } from "@react-three/drei";
+import { Html, OrbitControls } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
-import { Box } from "lucide-react";
+import { Box, Tag } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { useDesignStore } from "../stores/designStore";
@@ -226,11 +226,15 @@ function WoodPanel({
   size,
   color,
   woodTexture,
+  label,
+  showLabel,
 }: {
   position: [number, number, number];
   size: [number, number, number];
   color: string;
   woodTexture: THREE.CanvasTexture;
+  label?: string;
+  showLabel?: boolean;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
 
@@ -238,6 +242,18 @@ function WoodPanel({
     <mesh position={position} ref={meshRef}>
       <boxGeometry args={size} />
       <meshStandardMaterial map={woodTexture} roughness={0.7} metalness={0.0} />
+      {showLabel && label && (
+        <Html
+          position={[0, size[1] / 2 + 0.05, 0]}
+          center
+          distanceFactor={8}
+          occlude={false}
+        >
+          <div className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded shadow-lg whitespace-nowrap">
+            {label}
+          </div>
+        </Html>
+      )}
     </mesh>
   );
 }
@@ -245,8 +261,10 @@ function WoodPanel({
 // 3D Scene with all furniture panels
 function FurnitureScene({
   onBoundsCalculated,
+  showLabels,
 }: {
   onBoundsCalculated?: (center: [number, number, number], size: number) => void;
+  showLabels?: boolean;
 }) {
   const { panels, settings } = useDesignStore();
 
@@ -342,6 +360,7 @@ function FurnitureScene({
           const zPos = getZPosition(panelDepth);
           return {
             id: panel.id,
+            label: panel.label,
             position: [x3d + panelW / 2, y3d, zPos] as [number, number, number],
             size: [panelW, panelT, panelDepth] as [number, number, number],
           };
@@ -352,6 +371,7 @@ function FurnitureScene({
           const zPos = getZPosition(panelDepth);
           return {
             id: panel.id,
+            label: panel.label,
             position: [x3d + panelT / 2, y3d, zPos] as [number, number, number],
             size: [panelT, panelH, panelDepth] as [number, number, number],
           };
@@ -361,6 +381,7 @@ function FurnitureScene({
           // Back panel: at the back - panel.height tall in 3D Y
           return {
             id: panel.id,
+            label: panel.label,
             position: [x3d + panelW / 2, y3d, fullDepth / 2 - panelT / 2] as [
               number,
               number,
@@ -373,6 +394,7 @@ function FurnitureScene({
         default: {
           return {
             id: panel.id,
+            label: panel.label,
             position: [x3d + panelW / 2, y3d, 0] as [number, number, number],
             size: [panelW, panelT, panelDepth] as [number, number, number],
           };
@@ -417,6 +439,8 @@ function FurnitureScene({
           size={panel.size}
           color={woodColor}
           woodTexture={woodTexture}
+          label={panel.label}
+          showLabel={showLabels}
         />
       ))}
 
@@ -474,11 +498,12 @@ function CameraController({
 }
 
 export default function Preview3D() {
-  const { panels } = useDesignStore();
+  const { panels, settings, updateSettings } = useDesignStore();
   const [cameraTarget, setCameraTarget] = useState<[number, number, number]>([
     0, 0, 0,
   ]);
   const [furnitureSize, setFurnitureSize] = useState(5);
+  const showLabels = settings.show3DLabels ?? false;
 
   const handleBoundsCalculated = useCallback(
     (center: [number, number, number], size: number) => {
@@ -506,10 +531,23 @@ export default function Preview3D() {
         <div className="flex items-center gap-2">
           <Box size={18} className="text-blue-600" />
           <span className="text-sm font-medium text-gray-700">3D Preview</span>
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-gray-500 hidden sm:inline">
             Drag to rotate • Right-click drag to pan • Scroll to zoom
           </span>
         </div>
+        {panels.length > 0 && (
+          <button
+            onClick={() => updateSettings({ show3DLabels: !showLabels })}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors ${
+              showLabels 
+                ? "bg-blue-100 text-blue-700" 
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            <Tag size={12} />
+            Labels
+          </button>
+        )}
       </div>
 
       <div className="flex-1 bg-gradient-to-b from-slate-100 to-slate-200">
@@ -538,7 +576,7 @@ export default function Preview3D() {
               background: "linear-gradient(to bottom, #f1f5f9, #e2e8f0)",
             }}
           >
-            <FurnitureScene onBoundsCalculated={handleBoundsCalculated} />
+            <FurnitureScene onBoundsCalculated={handleBoundsCalculated} showLabels={showLabels} />
             <CameraController target={cameraTarget} distance={furnitureSize} />
           </Canvas>
         )}

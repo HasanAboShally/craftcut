@@ -1,4 +1,4 @@
-import type { OptimizationResult, Panel, Placement, Sheet } from "../types";
+import type { GrainDirection, OptimizationResult, Panel, Placement, Sheet } from "../types";
 
 interface Piece {
   id: string;
@@ -8,6 +8,7 @@ interface Piece {
   height: number; // Cut height (short dimension)
   sourceId: string;
   orientation: string;
+  grainDirection?: GrainDirection; // Grain direction affects rotation
 }
 
 interface FreeRect {
@@ -115,6 +116,7 @@ export function optimizeCuts(
         height: h,
         sourceId: panel.id,
         orientation: panel.orientation || "horizontal",
+        grainDirection: panel.grainDirection, // Preserve grain direction
       });
     }
   }
@@ -152,10 +154,16 @@ function packPieces(
   const sheetArea = sheetWidth * sheetHeight;
 
   for (const piece of pieces) {
+    // Grain direction affects rotation options
+    // - "horizontal": grain runs along width, cannot rotate (would flip grain)
+    // - "vertical": grain runs along height, cannot rotate
+    // - "none": no grain constraint, can rotate freely
+    const canRotate = piece.grainDirection === undefined || piece.grainDirection === "none";
+    
     // Check if piece can fit at all (with kerf consideration)
     const canFitNormal =
       piece.width + KERF <= sheetWidth && piece.height + KERF <= sheetHeight;
-    const canFitRotated =
+    const canFitRotated = canRotate &&
       piece.height + KERF <= sheetWidth && piece.width + KERF <= sheetHeight;
 
     if (!canFitNormal && !canFitRotated) {
@@ -172,7 +180,7 @@ function packPieces(
     let bestPlacement: { sheetIndex: number; x: number; y: number; rotated: boolean; score: number } | null = null;
 
     for (let i = 0; i < sheets.length; i++) {
-      const position = findBestPosition(sheets[i], piece, sheetWidth, sheetHeight);
+      const position = findBestPosition(sheets[i], piece, sheetWidth, sheetHeight, canRotate);
       if (position) {
         // Score: lower is better (tighter fit, less wasted space)
         if (!bestPlacement || position.score < bestPlacement.score) {
@@ -193,6 +201,7 @@ function packPieces(
         height: bestPlacement.rotated ? piece.width : piece.height,
         rotated: bestPlacement.rotated,
         sourceId: piece.sourceId,
+        grainDirection: piece.grainDirection,
       });
       sheet.usedArea += piece.width * piece.height;
       sheet.wastePercent = Math.round((1 - sheet.usedArea / sheetArea) * 100);
@@ -205,7 +214,7 @@ function packPieces(
         wastePercent: 100,
       };
 
-      const rotated = !canFitNormal && canFitRotated;
+      const rotated = canRotate && !canFitNormal && canFitRotated;
       newSheet.placements.push({
         id: piece.id,
         label: piece.label,
@@ -216,6 +225,7 @@ function packPieces(
         height: rotated ? piece.width : piece.height,
         rotated,
         sourceId: piece.sourceId,
+        grainDirection: piece.grainDirection,
       });
       newSheet.usedArea = piece.width * piece.height;
       newSheet.wastePercent = Math.round(
@@ -249,6 +259,7 @@ function findBestPosition(
   piece: Piece,
   sheetWidth: number,
   sheetHeight: number,
+  canRotate: boolean = true,
 ): { x: number; y: number; rotated: boolean; score: number } | null {
   // Get free rectangles using maximal rectangles algorithm
   const freeRects = getFreeRectangles(sheet, sheetWidth, sheetHeight);
@@ -269,8 +280,8 @@ function findBestPosition(
       }
     }
     
-    // Try rotated orientation (only if dimensions differ)
-    if (piece.width !== piece.height && 
+    // Try rotated orientation (only if dimensions differ and rotation is allowed)
+    if (canRotate && piece.width !== piece.height && 
         piece.height + KERF <= rect.width && piece.width + KERF <= rect.height) {
       const leftoverH = rect.width - piece.height;
       const leftoverV = rect.height - piece.width;
