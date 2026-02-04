@@ -13,13 +13,20 @@ interface PrintViewProps {
 }
 
 // Get true dimensions based on orientation
-function getTrueDimensions(panel: Panel, thickness: number): { width: number; height: number } {
+function getTrueDimensions(
+  panel: Panel,
+  thickness: number,
+): { width: number; height: number } {
   const orientation = panel.orientation || "horizontal";
   switch (orientation) {
-    case "horizontal": return { width: panel.width, height: thickness };
-    case "vertical": return { width: thickness, height: panel.height };
-    case "back": return { width: panel.width, height: panel.height };
-    default: return { width: panel.width, height: thickness };
+    case "horizontal":
+      return { width: panel.width, height: thickness };
+    case "vertical":
+      return { width: thickness, height: panel.height };
+    case "back":
+      return { width: panel.width, height: panel.height };
+    default:
+      return { width: panel.width, height: thickness };
   }
 }
 
@@ -30,18 +37,26 @@ export default function PrintView({ onClose }: PrintViewProps) {
   // Calculate bounds
   const bounds = React.useMemo(() => {
     if (panels.length === 0) return { minX: 0, maxX: 1000, minY: 0, maxY: 800 };
-    
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    
-    panels.forEach(p => {
+
+    let minX = Infinity,
+      maxX = -Infinity,
+      minY = Infinity,
+      maxY = -Infinity;
+
+    panels.forEach((p) => {
       const dims = getTrueDimensions(p, settings.thickness);
       minX = Math.min(minX, p.x);
       maxX = Math.max(maxX, p.x + dims.width);
       minY = Math.min(minY, p.y);
       maxY = Math.max(maxY, p.y + dims.height);
     });
-    
-    return { minX: minX - 50, maxX: maxX + 50, minY: minY - 50, maxY: maxY + 50 };
+
+    return {
+      minX: minX - 50,
+      maxX: maxX + 50,
+      minY: minY - 50,
+      maxY: maxY + 50,
+    };
   }, [panels, settings.thickness]);
 
   const totalWidth = bounds.maxX - bounds.minX;
@@ -53,12 +68,15 @@ export default function PrintView({ onClose }: PrintViewProps) {
       id: string;
       axis: "x" | "y";
       value: number;
-      x1: number; y1: number;
-      x2: number; y2: number;
-      labelX: number; labelY: number;
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      labelX: number;
+      labelY: number;
     }[] = [];
 
-    const panelBounds = panels.map(p => {
+    const panelBounds = panels.map((p) => {
       const dims = getTrueDimensions(p, settings.thickness);
       return {
         id: p.id,
@@ -71,7 +89,7 @@ export default function PrintView({ onClose }: PrintViewProps) {
       };
     });
 
-    panelBounds.forEach(panel => {
+    panelBounds.forEach((panel) => {
       // Floor distance
       if (panel.bottom > 0) {
         result.push({
@@ -89,13 +107,22 @@ export default function PrintView({ onClose }: PrintViewProps) {
 
       // Horizontal gaps
       const rightNeighbor = panelBounds
-        .filter(p => p.id !== panel.id && p.top > panel.bottom && p.bottom < panel.top && p.left > panel.right)
+        .filter(
+          (p) =>
+            p.id !== panel.id &&
+            p.top > panel.bottom &&
+            p.bottom < panel.top &&
+            p.left > panel.right,
+        )
         .sort((a, b) => a.left - b.left)[0];
 
       if (rightNeighbor) {
         const gap = rightNeighbor.left - panel.right;
         if (gap > 0) {
-          const avgY = (Math.max(panel.bottom, rightNeighbor.bottom) + Math.min(panel.top, rightNeighbor.top)) / 2;
+          const avgY =
+            (Math.max(panel.bottom, rightNeighbor.bottom) +
+              Math.min(panel.top, rightNeighbor.top)) /
+            2;
           result.push({
             id: `${panel.id}-right`,
             axis: "x",
@@ -112,13 +139,22 @@ export default function PrintView({ onClose }: PrintViewProps) {
 
       // Vertical gaps
       const aboveNeighbor = panelBounds
-        .filter(p => p.id !== panel.id && p.right > panel.left && p.left < panel.right && p.bottom > panel.top)
+        .filter(
+          (p) =>
+            p.id !== panel.id &&
+            p.right > panel.left &&
+            p.left < panel.right &&
+            p.bottom > panel.top,
+        )
         .sort((a, b) => a.bottom - b.bottom)[0];
 
       if (aboveNeighbor) {
         const gap = aboveNeighbor.bottom - panel.top;
         if (gap > 0) {
-          const avgX = (Math.max(panel.left, aboveNeighbor.left) + Math.min(panel.right, aboveNeighbor.right)) / 2;
+          const avgX =
+            (Math.max(panel.left, aboveNeighbor.left) +
+              Math.min(panel.right, aboveNeighbor.right)) /
+            2;
           result.push({
             id: `${panel.id}-above`,
             axis: "y",
@@ -139,18 +175,22 @@ export default function PrintView({ onClose }: PrintViewProps) {
 
   // Overall dimensions
   const overallDims = React.useMemo(() => {
-    if (panels.length === 0) return { width: 0, height: 0, minX: 0, maxX: 0, minY: 0, maxY: 0 };
-    
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    
-    panels.forEach(p => {
+    if (panels.length === 0)
+      return { width: 0, height: 0, minX: 0, maxX: 0, minY: 0, maxY: 0 };
+
+    let minX = Infinity,
+      maxX = -Infinity,
+      minY = Infinity,
+      maxY = -Infinity;
+
+    panels.forEach((p) => {
       const dims = getTrueDimensions(p, settings.thickness);
       minX = Math.min(minX, p.x);
       maxX = Math.max(maxX, p.x + dims.width);
       minY = Math.min(minY, p.y);
       maxY = Math.max(maxY, p.y + dims.height);
     });
-    
+
     return { width: maxX - minX, height: maxY - minY, minX, maxX, minY, maxY };
   }, [panels, settings.thickness]);
 
@@ -204,9 +244,11 @@ export default function PrintView({ onClose }: PrintViewProps) {
 
       {/* Printable content */}
       <div ref={printRef} className="print-content p-8 max-w-[210mm] mx-auto">
-        
         {/* ==================== COVER PAGE ==================== */}
-        <div className="cover-page flex flex-col justify-between pb-8" style={{ minHeight: "250mm" }}>
+        <div
+          className="cover-page flex flex-col justify-between pb-8"
+          style={{ minHeight: "250mm" }}
+        >
           {/* Top - Project Name */}
           <div className="pt-16 text-center">
             <h1 className="text-4xl font-bold text-gray-900 tracking-tight mb-2">
@@ -214,34 +256,48 @@ export default function PrintView({ onClose }: PrintViewProps) {
             </h1>
             <p className="text-lg text-gray-500">Build Instructions</p>
           </div>
-          
+
           {/* Center - 3D View (large, centered) */}
           <div className="flex-1 flex items-center justify-center py-8">
             <div className="w-full flex justify-center">
               <Print3DImage width={550} height={420} />
             </div>
           </div>
-          
+
           {/* Bottom - Quick specs */}
           <div className="text-center">
             <div className="inline-flex gap-8 px-8 py-4 bg-gray-100 rounded-lg">
               <div>
-                <div className="text-2xl font-bold text-gray-900">{Math.round(overallDims.width)}</div>
-                <div className="text-xs text-gray-500 uppercase">Width (mm)</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {Math.round(overallDims.width)}
+                </div>
+                <div className="text-xs text-gray-500 uppercase">
+                  Width (mm)
+                </div>
               </div>
               <div className="border-l border-gray-300" />
               <div>
-                <div className="text-2xl font-bold text-gray-900">{Math.round(overallDims.height)}</div>
-                <div className="text-xs text-gray-500 uppercase">Height (mm)</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {Math.round(overallDims.height)}
+                </div>
+                <div className="text-xs text-gray-500 uppercase">
+                  Height (mm)
+                </div>
               </div>
               <div className="border-l border-gray-300" />
               <div>
-                <div className="text-2xl font-bold text-gray-900">{settings.furnitureDepth || 400}</div>
-                <div className="text-xs text-gray-500 uppercase">Depth (mm)</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {settings.furnitureDepth || 400}
+                </div>
+                <div className="text-xs text-gray-500 uppercase">
+                  Depth (mm)
+                </div>
               </div>
               <div className="border-l border-gray-300" />
               <div>
-                <div className="text-2xl font-bold text-gray-900">{panels.length}</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {panels.length}
+                </div>
                 <div className="text-xs text-gray-500 uppercase">Panels</div>
               </div>
             </div>
@@ -256,7 +312,9 @@ export default function PrintView({ onClose }: PrintViewProps) {
         {/* Front View */}
         <section className="mb-8 page-break-inside-avoid">
           <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">1</span>
+            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">
+              1
+            </span>
             Front View with Measurements
           </h2>
           <div className="border-2 border-gray-900 rounded-lg p-4 bg-white">
@@ -274,10 +332,12 @@ export default function PrintView({ onClose }: PrintViewProps) {
                 stroke="#000"
                 strokeWidth={2}
               />
-              <text x={bounds.minX - 15} y={12} fontSize={10} fill="#666">Floor</text>
+              <text x={bounds.minX - 15} y={12} fontSize={10} fill="#666">
+                Floor
+              </text>
 
               {/* Panels */}
-              {panels.map(p => {
+              {panels.map((p) => {
                 const dims = getTrueDimensions(p, settings.thickness);
                 const screenY = -p.y - dims.height;
                 return (
@@ -294,8 +354,22 @@ export default function PrintView({ onClose }: PrintViewProps) {
                     {/* Cross-hatch for thickness indication */}
                     {p.orientation === "vertical" && (
                       <>
-                        <line x1={p.x} y1={screenY} x2={p.x + dims.width} y2={screenY + dims.height} stroke="#000" strokeWidth={0.5} />
-                        <line x1={p.x + dims.width} y1={screenY} x2={p.x} y2={screenY + dims.height} stroke="#000" strokeWidth={0.5} />
+                        <line
+                          x1={p.x}
+                          y1={screenY}
+                          x2={p.x + dims.width}
+                          y2={screenY + dims.height}
+                          stroke="#000"
+                          strokeWidth={0.5}
+                        />
+                        <line
+                          x1={p.x + dims.width}
+                          y1={screenY}
+                          x2={p.x}
+                          y2={screenY + dims.height}
+                          stroke="#000"
+                          strokeWidth={0.5}
+                        />
                       </>
                     )}
                     {/* Panel label */}
@@ -314,7 +388,7 @@ export default function PrintView({ onClose }: PrintViewProps) {
               })}
 
               {/* Measurements */}
-              {measurements.map(m => {
+              {measurements.map((m) => {
                 const screenY1 = -m.y1;
                 const screenY2 = -m.y2;
                 const screenLabelY = -m.labelY;
@@ -334,13 +408,41 @@ export default function PrintView({ onClose }: PrintViewProps) {
                     {/* End caps */}
                     {isVertical ? (
                       <>
-                        <line x1={m.x1 - 4} y1={screenY1} x2={m.x1 + 4} y2={screenY1} stroke="#000" strokeWidth={0.75} />
-                        <line x1={m.x2 - 4} y1={screenY2} x2={m.x2 + 4} y2={screenY2} stroke="#000" strokeWidth={0.75} />
+                        <line
+                          x1={m.x1 - 4}
+                          y1={screenY1}
+                          x2={m.x1 + 4}
+                          y2={screenY1}
+                          stroke="#000"
+                          strokeWidth={0.75}
+                        />
+                        <line
+                          x1={m.x2 - 4}
+                          y1={screenY2}
+                          x2={m.x2 + 4}
+                          y2={screenY2}
+                          stroke="#000"
+                          strokeWidth={0.75}
+                        />
                       </>
                     ) : (
                       <>
-                        <line x1={m.x1} y1={screenY1 - 4} x2={m.x1} y2={screenY1 + 4} stroke="#000" strokeWidth={0.75} />
-                        <line x1={m.x2} y1={screenY2 - 4} x2={m.x2} y2={screenY2 + 4} stroke="#000" strokeWidth={0.75} />
+                        <line
+                          x1={m.x1}
+                          y1={screenY1 - 4}
+                          x2={m.x1}
+                          y2={screenY1 + 4}
+                          stroke="#000"
+                          strokeWidth={0.75}
+                        />
+                        <line
+                          x1={m.x2}
+                          y1={screenY2 - 4}
+                          x2={m.x2}
+                          y2={screenY2 + 4}
+                          stroke="#000"
+                          strokeWidth={0.75}
+                        />
                       </>
                     )}
                     {/* Label */}
@@ -377,8 +479,22 @@ export default function PrintView({ onClose }: PrintViewProps) {
                   stroke="#000"
                   strokeWidth={1}
                 />
-                <line x1={overallDims.minX} y1={-overallDims.maxY - 20} x2={overallDims.minX} y2={-overallDims.maxY - 10} stroke="#000" strokeWidth={1} />
-                <line x1={overallDims.maxX} y1={-overallDims.maxY - 20} x2={overallDims.maxX} y2={-overallDims.maxY - 10} stroke="#000" strokeWidth={1} />
+                <line
+                  x1={overallDims.minX}
+                  y1={-overallDims.maxY - 20}
+                  x2={overallDims.minX}
+                  y2={-overallDims.maxY - 10}
+                  stroke="#000"
+                  strokeWidth={1}
+                />
+                <line
+                  x1={overallDims.maxX}
+                  y1={-overallDims.maxY - 20}
+                  x2={overallDims.maxX}
+                  y2={-overallDims.maxY - 10}
+                  stroke="#000"
+                  strokeWidth={1}
+                />
                 <rect
                   x={(overallDims.minX + overallDims.maxX) / 2 - 35}
                   y={-overallDims.maxY - 32}
@@ -408,8 +524,22 @@ export default function PrintView({ onClose }: PrintViewProps) {
                   stroke="#000"
                   strokeWidth={1}
                 />
-                <line x1={overallDims.minX - 20} y1={-overallDims.minY} x2={overallDims.minX - 10} y2={-overallDims.minY} stroke="#000" strokeWidth={1} />
-                <line x1={overallDims.minX - 20} y1={-overallDims.maxY} x2={overallDims.minX - 10} y2={-overallDims.maxY} stroke="#000" strokeWidth={1} />
+                <line
+                  x1={overallDims.minX - 20}
+                  y1={-overallDims.minY}
+                  x2={overallDims.minX - 10}
+                  y2={-overallDims.minY}
+                  stroke="#000"
+                  strokeWidth={1}
+                />
+                <line
+                  x1={overallDims.minX - 20}
+                  y1={-overallDims.maxY}
+                  x2={overallDims.minX - 10}
+                  y2={-overallDims.maxY}
+                  stroke="#000"
+                  strokeWidth={1}
+                />
                 <rect
                   x={overallDims.minX - 55}
                   y={-(overallDims.minY + overallDims.maxY) / 2 - 13}
@@ -435,7 +565,9 @@ export default function PrintView({ onClose }: PrintViewProps) {
         {/* Cut List */}
         <section className="mb-8 page-break-inside-avoid">
           <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">2</span>
+            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">
+              2
+            </span>
             Cut List
           </h2>
           <CutListTable variant="print" />
@@ -444,20 +576,36 @@ export default function PrintView({ onClose }: PrintViewProps) {
         {/* Panel Diagrams - IKEA Style */}
         <section className="mb-8 page-break-inside-avoid">
           <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">3</span>
+            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">
+              3
+            </span>
             Panel Shapes
           </h2>
-          
+
           {(() => {
-            // Group panels by actual cut dimensions AND orientation
-            const grouped = new Map<string, { length: number; width: number; thickness: number; count: number; isVertical: boolean }>();
-            panels.forEach(p => {
+            // Create a map of panel ID to letter label from assembly steps
+            const panelLetters = new Map<string, string>();
+            assemblySteps.forEach((step) => {
+              panelLetters.set(step.panelId, step.letterLabel);
+            });
+
+            // Process each panel individually with its letter
+            type PanelData = {
+              id: string;
+              letter: string;
+              length: number;
+              width: number;
+              isVertical: boolean;
+              isBack: boolean;
+            };
+
+            const panelDataList: PanelData[] = panels.map((p) => {
               const orientation = p.orientation || "horizontal";
               const furnitureDepth = p.depth || settings.furnitureDepth || 400;
-              
+
               let cutLength: number;
               let cutWidth: number;
-              
+
               if (orientation === "horizontal") {
                 cutLength = p.width;
                 cutWidth = furnitureDepth;
@@ -468,83 +616,121 @@ export default function PrintView({ onClose }: PrintViewProps) {
                 cutLength = Math.max(p.width, p.height);
                 cutWidth = Math.min(p.width, p.height);
               }
-              
-              const length = Math.max(cutLength, cutWidth);
-              const width = Math.min(cutLength, cutWidth);
-              const isVertical = orientation === "vertical";
-              
-              const key = `${length}x${width}x${isVertical ? 'v' : 'h'}`;
-              const existing = grouped.get(key);
-              if (existing) {
-                existing.count++;
-              } else {
-                grouped.set(key, { length, width, thickness: settings.thickness, count: 1, isVertical });
-              }
+
+              return {
+                id: p.id,
+                letter: panelLetters.get(p.id) || "?",
+                length: Math.max(cutLength, cutWidth),
+                width: Math.min(cutLength, cutWidth),
+                isVertical: orientation === "vertical",
+                isBack: orientation === "back",
+              };
             });
-            
-            // Split into vertical and horizontal groups
-            const verticalPanels: Array<[string, typeof grouped extends Map<string, infer V> ? V : never]> = [];
-            const horizontalPanels: Array<[string, typeof grouped extends Map<string, infer V> ? V : never]> = [];
-            
-            grouped.forEach((value, key) => {
-              if (value.isVertical) {
-                verticalPanels.push([key, value]);
-              } else {
-                horizontalPanels.push([key, value]);
-              }
-            });
-            
-            // Sort each group by length
-            verticalPanels.sort((a, b) => b[1].length - a[1].length);
-            horizontalPanels.sort((a, b) => b[1].length - a[1].length);
-            
-            // Find max for consistent scaling across ALL panels
+
+            // Sort by letter (assembly order)
+            panelDataList.sort((a, b) => a.letter.localeCompare(b.letter));
+
+            // Split into groups
+            const verticalPanels = panelDataList.filter((p) => p.isVertical);
+            const horizontalPanels = panelDataList.filter((p) => !p.isVertical && !p.isBack);
+            const backPanels = panelDataList.filter((p) => p.isBack);
+
+            // Find max dimension for consistent scaling
             let maxDim = 0;
-            grouped.forEach(({ length }) => {
+            panelDataList.forEach(({ length }) => {
               if (length > maxDim) maxDim = length;
             });
-            
-            const renderPanel = (key: string, { length, width, count, isVertical }: { length: number; width: number; thickness: number; count: number; isVertical: boolean }) => {
+
+            const renderPanel = (panel: PanelData) => {
+              const { id, letter, length, width, isVertical } = panel;
               const maxSize = 100;
               const scale = maxSize / maxDim;
-              const t = 2; // Thin depth
-              
+              const t = 2; // Thin depth for 3D effect
+
               if (isVertical) {
                 // Vertical panel - standing up (length is height)
                 const h = length * scale;
                 const w = Math.max(width * scale, 15);
-                
+
                 const leftMargin = 35;
-                const topMargin = 8;
+                const topMargin = 20; // Extra space for letter label
                 const bottomMargin = 22;
                 const rightMargin = 8;
                 const svgW = leftMargin + w + t + rightMargin;
                 const svgH = topMargin + h + t + bottomMargin;
-                
+
                 return (
-                  <div key={key} className="flex flex-col items-center">
-                    <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`}>
+                  <div key={id} className="flex flex-col items-center">
+                    <svg
+                      width={svgW}
+                      height={svgH}
+                      viewBox={`0 0 ${svgW} ${svgH}`}
+                    >
+                      {/* Letter label circle */}
+                      <circle
+                        cx={leftMargin + w / 2}
+                        cy={10}
+                        r={9}
+                        fill="#1e40af"
+                      />
+                      <text
+                        x={leftMargin + w / 2}
+                        y={14}
+                        fontSize={12}
+                        fill="white"
+                        textAnchor="middle"
+                        fontWeight={700}
+                      >
+                        {letter}
+                      </text>
+
                       {/* Top edge */}
                       <polygon
                         points={`${leftMargin},${topMargin + t} ${leftMargin + t},${topMargin} ${leftMargin + w + t},${topMargin} ${leftMargin + w},${topMargin + t}`}
-                        fill="#e8e8e8" stroke="#333" strokeWidth={0.75}
+                        fill="#e8e8e8"
+                        stroke="#333"
+                        strokeWidth={0.75}
                       />
                       {/* Right edge */}
                       <polygon
                         points={`${leftMargin + w},${topMargin + t} ${leftMargin + w + t},${topMargin} ${leftMargin + w + t},${topMargin + h} ${leftMargin + w},${topMargin + h + t}`}
-                        fill="#d8d8d8" stroke="#333" strokeWidth={0.75}
+                        fill="#d8d8d8"
+                        stroke="#333"
+                        strokeWidth={0.75}
                       />
                       {/* Front face */}
-                      <rect x={leftMargin} y={topMargin + t} width={w} height={h} fill="#f5f5f5" stroke="#333" strokeWidth={1} />
-                      
+                      <rect
+                        x={leftMargin}
+                        y={topMargin + t}
+                        width={w}
+                        height={h}
+                        fill="#f5f5f5"
+                        stroke="#333"
+                        strokeWidth={1}
+                      />
+
                       {/* Height dimension (left) */}
-                      <text x={leftMargin - 5} y={topMargin + t + h / 2} fontSize={9} fill="#333" textAnchor="end" dominantBaseline="middle">{length}</text>
-                      
+                      <text
+                        x={leftMargin - 5}
+                        y={topMargin + t + h / 2}
+                        fontSize={9}
+                        fill="#333"
+                        textAnchor="end"
+                        dominantBaseline="middle"
+                      >
+                        {length}
+                      </text>
+
                       {/* Width dimension (bottom) */}
-                      <text x={leftMargin + w / 2} y={topMargin + t + h + 15} fontSize={9} fill="#333" textAnchor="middle">{width}</text>
-                      
-                      {/* Quantity */}
-                      <text x={leftMargin - 5} y={topMargin + t + h + 15} fontSize={12} fill="#333" fontWeight={700} textAnchor="end">{count}×</text>
+                      <text
+                        x={leftMargin + w / 2}
+                        y={topMargin + t + h + 15}
+                        fontSize={9}
+                        fill="#333"
+                        textAnchor="middle"
+                      >
+                        {width}
+                      </text>
                     </svg>
                   </div>
                 );
@@ -552,62 +738,126 @@ export default function PrintView({ onClose }: PrintViewProps) {
                 // Horizontal panel - lying flat (length is width, shown horizontally)
                 const w = length * scale;
                 const h = Math.max(width * scale, 12);
-                
+
                 const leftMargin = 25;
-                const topMargin = 8;
+                const topMargin = 20; // Extra space for letter label
                 const bottomMargin = 20;
                 const rightMargin = 8;
                 const svgW = leftMargin + w + t + rightMargin;
                 const svgH = topMargin + h + t + bottomMargin;
-                
+
                 return (
-                  <div key={key} className="flex flex-col items-center">
-                    <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`}>
+                  <div key={id} className="flex flex-col items-center">
+                    <svg
+                      width={svgW}
+                      height={svgH}
+                      viewBox={`0 0 ${svgW} ${svgH}`}
+                    >
+                      {/* Letter label circle */}
+                      <circle
+                        cx={leftMargin + w / 2}
+                        cy={10}
+                        r={9}
+                        fill="#1e40af"
+                      />
+                      <text
+                        x={leftMargin + w / 2}
+                        y={14}
+                        fontSize={12}
+                        fill="white"
+                        textAnchor="middle"
+                        fontWeight={700}
+                      >
+                        {letter}
+                      </text>
+
                       {/* Top edge */}
                       <polygon
                         points={`${leftMargin},${topMargin + t} ${leftMargin + t},${topMargin} ${leftMargin + w + t},${topMargin} ${leftMargin + w},${topMargin + t}`}
-                        fill="#e8e8e8" stroke="#333" strokeWidth={0.75}
+                        fill="#e8e8e8"
+                        stroke="#333"
+                        strokeWidth={0.75}
                       />
                       {/* Right edge */}
                       <polygon
                         points={`${leftMargin + w},${topMargin + t} ${leftMargin + w + t},${topMargin} ${leftMargin + w + t},${topMargin + h} ${leftMargin + w},${topMargin + h + t}`}
-                        fill="#d8d8d8" stroke="#333" strokeWidth={0.75}
+                        fill="#d8d8d8"
+                        stroke="#333"
+                        strokeWidth={0.75}
                       />
                       {/* Front face */}
-                      <rect x={leftMargin} y={topMargin + t} width={w} height={h} fill="#f5f5f5" stroke="#333" strokeWidth={1} />
-                      
+                      <rect
+                        x={leftMargin}
+                        y={topMargin + t}
+                        width={w}
+                        height={h}
+                        fill="#f5f5f5"
+                        stroke="#333"
+                        strokeWidth={1}
+                      />
+
                       {/* Width dimension (left - short side) */}
-                      <text x={leftMargin - 5} y={topMargin + t + h / 2} fontSize={9} fill="#333" textAnchor="end" dominantBaseline="middle">{width}</text>
-                      
+                      <text
+                        x={leftMargin - 5}
+                        y={topMargin + t + h / 2}
+                        fontSize={9}
+                        fill="#333"
+                        textAnchor="end"
+                        dominantBaseline="middle"
+                      >
+                        {width}
+                      </text>
+
                       {/* Length dimension (bottom - long side) */}
-                      <text x={leftMargin + w / 2} y={topMargin + t + h + 12} fontSize={9} fill="#333" textAnchor="middle">{length}</text>
-                      
-                      {/* Quantity */}
-                      <text x={leftMargin - 5} y={topMargin + t + h + 12} fontSize={12} fill="#333" fontWeight={700} textAnchor="end">{count}×</text>
+                      <text
+                        x={leftMargin + w / 2}
+                        y={topMargin + t + h + 12}
+                        fontSize={9}
+                        fill="#333"
+                        textAnchor="middle"
+                      >
+                        {length}
+                      </text>
                     </svg>
                   </div>
                 );
               }
             };
-            
+
             return (
               <div className="space-y-6">
                 {/* Vertical panels (sides, dividers) */}
                 {verticalPanels.length > 0 && (
                   <div>
-                    <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Vertical Panels (Sides)</div>
+                    <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">
+                      Vertical Panels (Sides & Dividers)
+                    </div>
                     <div className="flex flex-wrap gap-4 items-end">
-                      {verticalPanels.map(([key, panel]) => renderPanel(key, panel))}
+                      {verticalPanels.map((panel) => renderPanel(panel))}
                     </div>
                   </div>
                 )}
-                
+
                 {/* Horizontal panels (shelves, top, bottom) */}
                 {horizontalPanels.length > 0 && (
                   <div>
-                    <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Horizontal Panels (Shelves)</div>
+                    <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">
+                      Horizontal Panels (Shelves, Top & Bottom)
+                    </div>
                     <div className="flex flex-wrap gap-4 items-end">
-                      {horizontalPanels.map(([key, panel]) => renderPanel(key, panel))}
+                      {horizontalPanels.map((panel) => renderPanel(panel))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Back panels */}
+                {backPanels.length > 0 && (
+                  <div>
+                    <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">
+                      Back Panels
+                    </div>
+                    <div className="flex flex-wrap gap-4 items-end">
+                      {backPanels.map((panel) => renderPanel(panel))}
                     </div>
                   </div>
                 )}
@@ -619,24 +869,30 @@ export default function PrintView({ onClose }: PrintViewProps) {
         {/* Assembly Steps */}
         <section className="mb-8">
           <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">4</span>
+            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">
+              4
+            </span>
             Assembly Instructions
           </h2>
           <p className="text-sm text-gray-500 mb-4">
-            Estimated time: {assemblySummary.estimatedTime} • {assemblySummary.totalSteps} steps
+            Estimated time: {assemblySummary.estimatedTime} •{" "}
+            {assemblySummary.totalSteps} steps
           </p>
-          
+
           {/* Build letter labels map for illustrations */}
           {(() => {
             const letterLabels = new Map<string, string>();
-            assemblySteps.forEach(step => {
+            assemblySteps.forEach((step) => {
               letterLabels.set(step.panelId, step.letterLabel);
             });
-            
+
             return (
               <div className="grid grid-cols-2 gap-6">
                 {assemblySteps.map((step) => (
-                  <div key={step.stepNumber} className="flex gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200 page-break-inside-avoid">
+                  <div
+                    key={step.stepNumber}
+                    className="flex gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200 page-break-inside-avoid"
+                  >
                     {/* Left: Illustration */}
                     <div className="flex-shrink-0">
                       <AssemblyIllustration
@@ -648,7 +904,7 @@ export default function PrintView({ onClose }: PrintViewProps) {
                         size={140}
                       />
                     </div>
-                    
+
                     {/* Right: Step info */}
                     <div className="flex-1 flex flex-col">
                       {/* Step number and panel letter */}
@@ -659,18 +915,43 @@ export default function PrintView({ onClose }: PrintViewProps) {
                         <span className="text-lg font-bold text-gray-900">
                           Panel {step.letterLabel}
                         </span>
+                        {/* Stability warning badge */}
+                        {step.stabilityStatus === "unstable" && (
+                          <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded">
+                            ⚠ Unstable
+                          </span>
+                        )}
+                        {step.stabilityStatus === "needs-support" && (
+                          <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-medium rounded">
+                            ⚡ Support needed
+                          </span>
+                        )}
                       </div>
-                      
+
                       {/* Action */}
                       <div className="text-sm font-medium text-gray-700 mb-1">
                         {step.action}
                       </div>
-                      
+
                       {/* Instruction */}
                       <div className="text-sm text-gray-600 flex-1">
                         {step.instruction}
                       </div>
-                      
+
+                      {/* Support hint */}
+                      {step.supportHint && (
+                        <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                          <span className="font-medium">💡 Tip:</span> {step.supportHint.instruction}
+                        </div>
+                      )}
+
+                      {/* Alignment tip */}
+                      {step.alignmentTip && (
+                        <div className="mt-1 text-xs text-blue-600">
+                          📐 {step.alignmentTip}
+                        </div>
+                      )}
+
                       {/* Connections */}
                       {step.connectsToLetters.length > 0 && (
                         <div className="text-xs text-gray-400 mt-2 flex items-center gap-1">
@@ -689,13 +970,17 @@ export default function PrintView({ onClose }: PrintViewProps) {
         {/* Notes Section */}
         <section className="mb-8">
           <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">5</span>
+            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">
+              5
+            </span>
             Assembly Notes
           </h2>
           <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 min-h-[100px]">
-            <p className="text-sm text-gray-400 italic">Space for handwritten notes during assembly</p>
+            <p className="text-sm text-gray-400 italic">
+              Space for handwritten notes during assembly
+            </p>
             <div className="mt-4 space-y-6">
-              {[1, 2, 3, 4].map(i => (
+              {[1, 2, 3, 4].map((i) => (
                 <div key={i} className="border-b border-gray-200" />
               ))}
             </div>
@@ -705,25 +990,43 @@ export default function PrintView({ onClose }: PrintViewProps) {
         {/* Material Requirements */}
         <section className="page-break-inside-avoid">
           <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">6</span>
+            <span className="w-6 h-6 bg-gray-900 text-white rounded flex items-center justify-center text-xs font-bold">
+              6
+            </span>
             Material Summary
           </h2>
           <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
             <div>
-              <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Board Thickness</div>
-              <div className="text-lg font-semibold text-gray-900">{settings.thickness}mm</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                Board Thickness
+              </div>
+              <div className="text-lg font-semibold text-gray-900">
+                {settings.thickness}mm
+              </div>
             </div>
             <div>
-              <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Standard Depth</div>
-              <div className="text-lg font-semibold text-gray-900">{settings.furnitureDepth || 400}mm</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                Standard Depth
+              </div>
+              <div className="text-lg font-semibold text-gray-900">
+                {settings.furnitureDepth || 400}mm
+              </div>
             </div>
             <div>
-              <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Sheet Size</div>
-              <div className="text-lg font-semibold text-gray-900">{settings.sheetWidth} × {settings.sheetHeight}mm</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                Sheet Size
+              </div>
+              <div className="text-lg font-semibold text-gray-900">
+                {settings.sheetWidth} × {settings.sheetHeight}mm
+              </div>
             </div>
             <div>
-              <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Total Panels</div>
-              <div className="text-lg font-semibold text-gray-900">{panels.length} pieces</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                Total Panels
+              </div>
+              <div className="text-lg font-semibold text-gray-900">
+                {panels.length} pieces
+              </div>
             </div>
           </div>
         </section>
@@ -774,6 +1077,6 @@ export default function PrintView({ onClose }: PrintViewProps) {
         }
       `}</style>
     </div>,
-    document.body
+    document.body,
   );
 }

@@ -87,12 +87,17 @@ export default function CutListView() {
       <div className="flex-1 overflow-auto p-4">
         {panels.length === 0 ? (
           <div className="h-full flex items-center justify-center">
-            <div className="text-center text-gray-500">
-              <ClipboardList size={48} className="mx-auto mb-4 opacity-50" />
-              <p className="text-lg mb-2">No panels to cut</p>
-              <p className="text-sm">
-                Add panels in the Design view to generate a cut list
+            <div className="text-center max-w-sm">
+              <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <ClipboardList size={32} className="text-blue-400" />
+              </div>
+              <p className="text-lg font-medium text-gray-700 mb-2">No panels to cut</p>
+              <p className="text-sm text-gray-500 mb-4">
+                Switch to the Design view and add some panels to generate an optimized cut list.
               </p>
+              <div className="text-xs text-gray-400">
+                💡 Tip: The cut list optimizer will minimize waste when cutting panels from standard sheets
+              </div>
             </div>
           </div>
         ) : (

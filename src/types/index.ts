@@ -39,6 +39,7 @@ export interface DesignData {
 export interface Placement {
   id: string;
   label: string;
+  letter?: string; // Assembly letter (A, B, C...)
   x: number;
   y: number;
   width: number;
@@ -68,3 +69,55 @@ export interface OptimizationResult {
   totalWaste: number;
   unplacedPieces: Panel[];
 }
+
+// ============================================
+// Assembly Instruction Types
+// ============================================
+
+// How two panels connect to each other
+export type JointType =
+  | "corner" // Two panels meet at a 90° corner (L-shape)
+  | "t-joint" // One panel meets another mid-span (T-shape)
+  | "edge" // Panels share an edge (partial overlap)
+  | "dado" // Panel inserted into a groove (slot)
+  | "butt"; // Simple butt joint (face to edge)
+
+// Which edge/face of a panel is involved in a joint
+export type PanelEdge = "top" | "bottom" | "left" | "right" | "front" | "back";
+
+// Describes a connection between two panels
+export interface Joint {
+  panelAId: string;
+  panelBId: string;
+  type: JointType;
+  panelAEdge: PanelEdge;
+  panelBEdge: PanelEdge;
+  // Position along the edge where connection occurs (0-1 normalized)
+  positionOnA?: number;
+  positionOnB?: number;
+}
+
+// Stability status for an assembly step
+export type StabilityStatus =
+  | "stable" // Structure stands on its own
+  | "unstable" // Structure would tip without support
+  | "needs-support"; // Panel being added needs temporary support
+
+// Type of temporary support needed
+export type SupportType =
+  | "none"
+  | "hold" // Someone needs to hold it
+  | "prop" // Prop against wall/surface
+  | "clamp" // Use clamps to hold in place
+  | "lean"; // Lean panels against each other
+
+// Hint for temporary support during assembly
+export interface SupportHint {
+  type: SupportType;
+  instruction: string;
+  // Which panel(s) need support
+  targetPanelIds: string[];
+}
+
+// Direction the structure might tip
+export type TipDirection = "forward" | "backward" | "left" | "right" | "none";

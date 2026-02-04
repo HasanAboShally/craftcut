@@ -3,9 +3,11 @@ import type { OptimizationResult, Panel, Placement, Sheet } from "../types";
 interface Piece {
   id: string;
   label: string;
-  width: number;
-  height: number;
+  letter: string; // Assembly letter (A, B, C...)
+  width: number;  // Cut width (long dimension)
+  height: number; // Cut height (short dimension)
   sourceId: string;
+  orientation: string;
 }
 
 interface FreeRect {
@@ -15,13 +17,69 @@ interface FreeRect {
   height: number;
 }
 
+// Blade kerf - space lost to each cut (typical table saw blade)
+const KERF = 3; // mm
+
 /**
- * First-Fit Decreasing bin-packing algorithm with Guillotine cutting
+ * Get the actual cut dimensions for a panel based on its orientation.
+ * - Horizontal (shelf): cut width × depth
+ * - Vertical (divider): cut height × depth
+ * - Back: width × height
+ */
+function getCutDimensions(
+  panel: Panel,
+  furnitureDepth: number,
+): { cutWidth: number; cutHeight: number } {
+  const orientation = panel.orientation || "horizontal";
+  const depth = panel.depth || furnitureDepth;
+  
+  switch (orientation) {
+    case "horizontal":
+      // Shelf: width is the panel width, height is the depth
+      return { cutWidth: panel.width, cutHeight: depth };
+    case "vertical":
+      // Divider: width is the panel height, height is the depth
+      return { cutWidth: panel.height, cutHeight: depth };
+    case "back":
+      // Back panel: width × height as-is
+      return { cutWidth: panel.width, cutHeight: panel.height };
+    default:
+      return { cutWidth: panel.width, cutHeight: depth };
+  }
+}
+
+type SortStrategy = 'area' | 'width' | 'height' | 'perimeter' | 'maxSide';
+
+/**
+ * Sort pieces by different strategies for optimization comparison
+ */
+function sortPieces(pieces: Piece[], strategy: SortStrategy): Piece[] {
+  const sorted = [...pieces];
+  switch (strategy) {
+    case 'area':
+      return sorted.sort((a, b) => b.width * b.height - a.width * a.height);
+    case 'width':
+      return sorted.sort((a, b) => b.width - a.width || b.height - a.height);
+    case 'height':
+      return sorted.sort((a, b) => b.height - a.height || b.width - a.width);
+    case 'perimeter':
+      return sorted.sort((a, b) => (b.width + b.height) - (a.width + a.height));
+    case 'maxSide':
+      return sorted.sort((a, b) => Math.max(b.width, b.height) - Math.max(a.width, a.height));
+    default:
+      return sorted;
+  }
+}
+
+/**
+ * Advanced bin-packing with multiple strategies - picks the best result
  */
 export function optimizeCuts(
   panels: Panel[],
   sheetWidth: number,
   sheetHeight: number,
+  furnitureDepth: number = 400,
+  letterLabels?: Map<string, string>,
 ): OptimizationResult {
   if (panels.length === 0) {
     return {
@@ -32,35 +90,67 @@ export function optimizeCuts(
     };
   }
 
-  // Expand panels by quantity
+  // Expand panels by quantity and calculate cut dimensions
   const pieces: Piece[] = [];
-  let pieceIndex = 0;
   for (const panel of panels) {
+    const { cutWidth, cutHeight } = getCutDimensions(panel, furnitureDepth);
+    const letter = letterLabels?.get(panel.id) || "?";
+    
     for (let i = 0; i < panel.quantity; i++) {
+      // Normalize so width >= height (standard convention for cuts)
+      const w = Math.max(cutWidth, cutHeight);
+      const h = Math.min(cutWidth, cutHeight);
+      
       pieces.push({
         id: `${panel.id}_${i}`,
-        label: panel.quantity > 1 ? `${panel.label} (${i + 1})` : panel.label,
-        width: panel.width,
-        height: panel.height,
+        label: panel.label || `Panel ${letter}`,
+        letter: letter, // Same letter for all pieces of same panel type
+        width: w,
+        height: h,
         sourceId: panel.id,
+        orientation: panel.orientation || "horizontal",
       });
-      pieceIndex++;
     }
   }
 
-  // Sort by area descending (largest first)
-  pieces.sort((a, b) => b.width * b.height - a.width * a.height);
+  // Try multiple sorting strategies and pick the best result
+  const strategies: SortStrategy[] = ['area', 'width', 'height', 'perimeter', 'maxSide'];
+  let bestResult: OptimizationResult | null = null;
+  
+  for (const strategy of strategies) {
+    const sortedPieces = sortPieces(pieces, strategy);
+    const result = packPieces(sortedPieces, panels, sheetWidth, sheetHeight);
+    
+    // Compare results: fewer sheets wins, then lower waste
+    if (!bestResult || 
+        result.totalSheets < bestResult.totalSheets ||
+        (result.totalSheets === bestResult.totalSheets && result.totalWaste < bestResult.totalWaste)) {
+      bestResult = result;
+    }
+  }
 
+  return bestResult!;
+}
+
+/**
+ * Pack pieces into sheets using Best-Fit Decreasing with Guillotine cutting
+ */
+function packPieces(
+  pieces: Piece[],
+  panels: Panel[],
+  sheetWidth: number,
+  sheetHeight: number,
+): OptimizationResult {
   const sheets: Sheet[] = [];
   const unplacedPieces: Panel[] = [];
   const sheetArea = sheetWidth * sheetHeight;
 
   for (const piece of pieces) {
-    // Check if piece can fit at all
+    // Check if piece can fit at all (with kerf consideration)
     const canFitNormal =
-      piece.width <= sheetWidth && piece.height <= sheetHeight;
+      piece.width + KERF <= sheetWidth && piece.height + KERF <= sheetHeight;
     const canFitRotated =
-      piece.height <= sheetWidth && piece.width <= sheetHeight;
+      piece.height + KERF <= sheetWidth && piece.width + KERF <= sheetHeight;
 
     if (!canFitNormal && !canFitRotated) {
       // Piece is too large for any sheet
@@ -72,31 +162,36 @@ export function optimizeCuts(
       continue;
     }
 
-    let placed = false;
+    // Find the best position across all existing sheets (Best-Fit)
+    let bestPlacement: { sheetIndex: number; x: number; y: number; rotated: boolean; score: number } | null = null;
 
-    // Try to place in existing sheets
-    for (const sheet of sheets) {
-      const position = findPosition(sheet, piece, sheetWidth, sheetHeight);
+    for (let i = 0; i < sheets.length; i++) {
+      const position = findBestPosition(sheets[i], piece, sheetWidth, sheetHeight);
       if (position) {
-        sheet.placements.push({
-          id: piece.id,
-          label: piece.label,
-          x: position.x,
-          y: position.y,
-          width: position.rotated ? piece.height : piece.width,
-          height: position.rotated ? piece.width : piece.height,
-          rotated: position.rotated,
-          sourceId: piece.sourceId,
-        });
-        sheet.usedArea += piece.width * piece.height;
-        sheet.wastePercent = Math.round((1 - sheet.usedArea / sheetArea) * 100);
-        placed = true;
-        break;
+        // Score: lower is better (tighter fit, less wasted space)
+        if (!bestPlacement || position.score < bestPlacement.score) {
+          bestPlacement = { sheetIndex: i, ...position };
+        }
       }
     }
 
-    // Create new sheet if needed
-    if (!placed) {
+    if (bestPlacement) {
+      const sheet = sheets[bestPlacement.sheetIndex];
+      sheet.placements.push({
+        id: piece.id,
+        label: piece.label,
+        letter: piece.letter,
+        x: bestPlacement.x,
+        y: bestPlacement.y,
+        width: bestPlacement.rotated ? piece.height : piece.width,
+        height: bestPlacement.rotated ? piece.width : piece.height,
+        rotated: bestPlacement.rotated,
+        sourceId: piece.sourceId,
+      });
+      sheet.usedArea += piece.width * piece.height;
+      sheet.wastePercent = Math.round((1 - sheet.usedArea / sheetArea) * 100);
+    } else {
+      // Create new sheet
       const newSheet: Sheet = {
         id: `sheet_${sheets.length + 1}`,
         placements: [],
@@ -108,6 +203,7 @@ export function optimizeCuts(
       newSheet.placements.push({
         id: piece.id,
         label: piece.label,
+        letter: piece.letter,
         x: 0,
         y: 0,
         width: rotated ? piece.height : piece.width,
@@ -138,28 +234,49 @@ export function optimizeCuts(
   };
 }
 
-function findPosition(
+/**
+ * Find the best position in a sheet using Best-Fit strategy
+ * Returns position with a score (lower = better fit)
+ */
+function findBestPosition(
   sheet: Sheet,
   piece: Piece,
   sheetWidth: number,
   sheetHeight: number,
-): { x: number; y: number; rotated: boolean } | null {
-  // Get free rectangles using simple shelf algorithm
+): { x: number; y: number; rotated: boolean; score: number } | null {
+  // Get free rectangles using maximal rectangles algorithm
   const freeRects = getFreeRectangles(sheet, sheetWidth, sheetHeight);
+  
+  let bestFit: { x: number; y: number; rotated: boolean; score: number } | null = null;
 
   // Try each free rectangle
   for (const rect of freeRects) {
     // Try normal orientation
-    if (piece.width <= rect.width && piece.height <= rect.height) {
-      return { x: rect.x, y: rect.y, rotated: false };
+    if (piece.width + KERF <= rect.width && piece.height + KERF <= rect.height) {
+      // Score based on how well piece fits (Best Short Side Fit)
+      const leftoverH = rect.width - piece.width;
+      const leftoverV = rect.height - piece.height;
+      const score = Math.min(leftoverH, leftoverV) * 1000 + Math.max(leftoverH, leftoverV) + rect.y * 0.1;
+      
+      if (!bestFit || score < bestFit.score) {
+        bestFit = { x: rect.x, y: rect.y, rotated: false, score };
+      }
     }
-    // Try rotated
-    if (piece.height <= rect.width && piece.width <= rect.height) {
-      return { x: rect.x, y: rect.y, rotated: true };
+    
+    // Try rotated orientation (only if dimensions differ)
+    if (piece.width !== piece.height && 
+        piece.height + KERF <= rect.width && piece.width + KERF <= rect.height) {
+      const leftoverH = rect.width - piece.height;
+      const leftoverV = rect.height - piece.width;
+      const score = Math.min(leftoverH, leftoverV) * 1000 + Math.max(leftoverH, leftoverV) + rect.y * 0.1;
+      
+      if (!bestFit || score < bestFit.score) {
+        bestFit = { x: rect.x, y: rect.y, rotated: true, score };
+      }
     }
   }
 
-  return null;
+  return bestFit;
 }
 
 function getFreeRectangles(
@@ -171,66 +288,86 @@ function getFreeRectangles(
     return [{ x: 0, y: 0, width: sheetWidth, height: sheetHeight }];
   }
 
-  // Simple approach: find empty space to the right and below existing placements
+  // Use Guillotine algorithm with maximal rectangles
   const freeRects: FreeRect[] = [];
-
-  // Calculate bounding box of all placements
-  let maxX = 0;
-  let maxY = 0;
-
-  for (const p of sheet.placements) {
-    maxX = Math.max(maxX, p.x + p.width);
-    maxY = Math.max(maxY, p.y + p.height);
+  
+  // Start with the full sheet as free
+  let workingRects: FreeRect[] = [{ x: 0, y: 0, width: sheetWidth, height: sheetHeight }];
+  
+  // For each placement, split the affected free rectangles
+  for (const placement of sheet.placements) {
+    const newRects: FreeRect[] = [];
+    
+    for (const rect of workingRects) {
+      // Check if placement overlaps with this rect
+      if (placement.x >= rect.x + rect.width || 
+          placement.x + placement.width <= rect.x ||
+          placement.y >= rect.y + rect.height || 
+          placement.y + placement.height <= rect.y) {
+        // No overlap, keep the rect
+        newRects.push(rect);
+      } else {
+        // Overlap - split into up to 4 rectangles
+        
+        // Left rectangle
+        if (placement.x > rect.x) {
+          newRects.push({
+            x: rect.x,
+            y: rect.y,
+            width: placement.x - rect.x,
+            height: rect.height,
+          });
+        }
+        
+        // Right rectangle
+        if (placement.x + placement.width < rect.x + rect.width) {
+          newRects.push({
+            x: placement.x + placement.width,
+            y: rect.y,
+            width: rect.x + rect.width - (placement.x + placement.width),
+            height: rect.height,
+          });
+        }
+        
+        // Top rectangle
+        if (placement.y > rect.y) {
+          newRects.push({
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: placement.y - rect.y,
+          });
+        }
+        
+        // Bottom rectangle
+        if (placement.y + placement.height < rect.y + rect.height) {
+          newRects.push({
+            x: rect.x,
+            y: placement.y + placement.height,
+            width: rect.width,
+            height: rect.y + rect.height - (placement.y + placement.height),
+          });
+        }
+      }
+    }
+    
+    workingRects = newRects;
   }
-
-  // Space to the right of all placements
-  if (maxX < sheetWidth) {
-    freeRects.push({
-      x: maxX,
-      y: 0,
-      width: sheetWidth - maxX,
-      height: sheetHeight,
-    });
-  }
-
-  // Space below all placements
-  if (maxY < sheetHeight) {
-    freeRects.push({
-      x: 0,
-      y: maxY,
-      width: maxX, // Only up to the used width
-      height: sheetHeight - maxY,
-    });
-  }
-
-  // Also try to find gaps between placements (shelf-based)
-  // Group placements by Y position (shelves)
-  const shelves = new Map<number, Placement[]>();
-  for (const p of sheet.placements) {
-    const key = p.y;
-    if (!shelves.has(key)) shelves.set(key, []);
-    shelves.get(key)!.push(p);
-  }
-
-  // For each shelf, find space at the end
-  for (const [y, placements] of shelves) {
-    placements.sort((a, b) => a.x - b.x);
-    const lastPlacement = placements[placements.length - 1];
-    const endX = lastPlacement.x + lastPlacement.width;
-    const shelfHeight = Math.max(...placements.map((p) => p.height));
-
-    if (endX < maxX) {
-      freeRects.push({
-        x: endX,
-        y,
-        width: maxX - endX,
-        height: shelfHeight,
-      });
+  
+  // Filter out tiny rectangles (less than 10mm in either dimension)
+  const minDim = 10;
+  for (const rect of workingRects) {
+    if (rect.width >= minDim && rect.height >= minDim) {
+      freeRects.push(rect);
     }
   }
-
-  // Sort by area descending to prefer larger spaces
-  freeRects.sort((a, b) => b.width * b.height - a.width * a.height);
+  
+  // Merge adjacent rectangles where possible to create larger free spaces
+  // Sort by position for consistent ordering
+  freeRects.sort((a, b) => {
+    if (a.y !== b.y) return a.y - b.y;
+    return a.x - b.x;
+  });
 
   return freeRects;
 }
@@ -267,9 +404,11 @@ export function calculateCutList(panels: Panel[]): {
 export function calculateGroupedCutList(
   panels: Panel[],
   thickness: number,
-  furnitureDepth: number
+  furnitureDepth: number,
+  letterLabels?: Map<string, string>,
 ): {
   pieces: {
+    letter: string;
     length: number;
     width: number;
     thickness: number;
@@ -279,14 +418,18 @@ export function calculateGroupedCutList(
   totalPieces: number;
   totalArea: number;
 } {
-  const rawPieces: { length: number; width: number; thickness: number }[] = [];
-  
-  // Convert each panel to its actual cut piece dimensions
-  panels.forEach(p => {
+  // Group panels by their cut dimensions first, then merge
+  const dimensionGroups = new Map<
+    string,
+    { letter: string; length: number; width: number; thickness: number; qty: number }
+  >();
+
+  // Convert each panel to its actual cut piece dimensions and group
+  panels.forEach((p) => {
     const orientation = p.orientation || "horizontal";
     const panelDepth = p.depth || furnitureDepth;
     let length: number, width: number;
-    
+
     switch (orientation) {
       case "horizontal": // Shelf: depth goes into the furniture
         length = p.width;
@@ -304,38 +447,33 @@ export function calculateGroupedCutList(
         length = p.width;
         width = panelDepth;
     }
-    
+
     // Normalize: always have length >= width
     if (width > length) {
       [length, width] = [width, length];
     }
+
+    const key = `${length}x${width}x${thickness}`;
+    const letter = letterLabels?.get(p.id) || "?";
+    const existing = dimensionGroups.get(key);
     
-    rawPieces.push({ length, width, thickness });
-  });
-  
-  // Group by dimensions
-  const grouped = new Map<string, { length: number; width: number; thickness: number; qty: number }>();
-  
-  rawPieces.forEach(piece => {
-    const key = `${piece.length}x${piece.width}x${piece.thickness}`;
-    const existing = grouped.get(key);
     if (existing) {
-      existing.qty += 1;
+      existing.qty += p.quantity;
     } else {
-      grouped.set(key, { ...piece, qty: 1 });
+      dimensionGroups.set(key, { letter, length, width, thickness, qty: p.quantity });
     }
   });
-  
+
   // Convert to array with area calculation and sort by size (largest first)
-  const pieces = Array.from(grouped.values())
-    .map(p => ({
+  const pieces = Array.from(dimensionGroups.values())
+    .map((p) => ({
       ...p,
       area: (p.length * p.width * p.qty) / 1000000, // Convert to m²
     }))
-    .sort((a, b) => (b.length * b.width) - (a.length * a.width));
-  
+    .sort((a, b) => b.length * b.width - a.length * a.width);
+
   const totalPieces = pieces.reduce((sum, p) => sum + p.qty, 0);
   const totalArea = pieces.reduce((sum, p) => sum + p.area, 0);
-  
+
   return { pieces, totalPieces, totalArea };
 }

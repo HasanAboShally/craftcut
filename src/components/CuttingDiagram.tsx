@@ -1,30 +1,34 @@
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { useMemo } from "react";
+import { generateAssemblySteps } from "../lib/assembly";
 import { optimizeCuts } from "../lib/optimizer";
 import { useDesignStore } from "../stores/designStore";
 
-const DIAGRAM_WIDTH = 400;
-const DIAGRAM_HEIGHT = 200;
-
-const PIECE_COLORS = [
-  "#93c5fd",
-  "#86efac",
-  "#fcd34d",
-  "#fca5a5",
-  "#c4b5fd",
-  "#fdba74",
-  "#67e8f9",
-  "#f9a8d4",
-  "#a5b4fc",
-  "#d9f99d",
-];
+const DIAGRAM_WIDTH = 520;
+const DIAGRAM_HEIGHT = 260;
 
 export default function CuttingDiagram() {
   const { panels, settings } = useDesignStore();
 
+  // Get letter labels from assembly steps
+  const letterLabels = useMemo(() => {
+    const steps = generateAssemblySteps(panels, settings);
+    const labels = new Map<string, string>();
+    steps.forEach((step) => {
+      labels.set(step.panelId, step.letterLabel);
+    });
+    return labels;
+  }, [panels, settings]);
+
   const result = useMemo(() => {
-    return optimizeCuts(panels, settings.sheetWidth, settings.sheetHeight);
-  }, [panels, settings.sheetWidth, settings.sheetHeight]);
+    return optimizeCuts(
+      panels, 
+      settings.sheetWidth, 
+      settings.sheetHeight, 
+      settings.furnitureDepth || 400,
+      letterLabels
+    );
+  }, [panels, settings.sheetWidth, settings.sheetHeight, settings.furnitureDepth, letterLabels]);
 
   if (panels.length === 0) {
     return (
@@ -33,6 +37,16 @@ export default function CuttingDiagram() {
       </p>
     );
   }
+
+  // Calculate efficiency rating
+  const getEfficiencyRating = (waste: number) => {
+    if (waste <= 15) return { label: "Excellent", color: "text-green-600", bg: "bg-green-50" };
+    if (waste <= 30) return { label: "Good", color: "text-blue-600", bg: "bg-blue-50" };
+    if (waste <= 45) return { label: "Fair", color: "text-amber-600", bg: "bg-amber-50" };
+    return { label: "Poor", color: "text-red-600", bg: "bg-red-50" };
+  };
+  
+  const efficiency = getEfficiencyRating(result.totalWaste);
 
   const scale =
     Math.min(
@@ -44,119 +58,217 @@ export default function CuttingDiagram() {
   const scaledSheetHeight = settings.sheetHeight * scale;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-4 text-sm text-gray-600">
-          <span>
-            Sheets needed:{" "}
-            <strong className="text-gray-800">{result.totalSheets}</strong>
-          </span>
-          <span>
-            Material waste:{" "}
-            <strong className="text-gray-800">{result.totalWaste}%</strong>
-          </span>
+    <div className="space-y-5">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+          <div className="text-2xl font-bold text-slate-800">{result.totalSheets}</div>
+          <div className="text-sm text-slate-500">Sheets needed</div>
+        </div>
+        <div className={`rounded-lg p-4 border ${efficiency.bg} border-opacity-50`}>
+          <div className={`text-2xl font-bold ${efficiency.color}`}>{100 - result.totalWaste}%</div>
+          <div className="text-sm text-slate-500">Material used</div>
+        </div>
+        <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+          <div className={`text-2xl font-bold ${efficiency.color}`}>{efficiency.label}</div>
+          <div className="text-sm text-slate-500">Efficiency rating</div>
         </div>
       </div>
 
       {/* Unplaced pieces warning */}
       {result.unplacedPieces.length > 0 && (
-        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
           <AlertTriangle
             className="text-amber-500 flex-shrink-0 mt-0.5"
-            size={16}
+            size={18}
           />
           <div className="text-sm">
             <p className="font-medium text-amber-800">
-              Some pieces are too large
+              Some pieces are too large for the sheet
             </p>
-            <p className="text-amber-700">
-              {result.unplacedPieces.map((p) => p.label).join(", ")} won't fit
-              on a {settings.sheetWidth}×{settings.sheetHeight}mm sheet.
+            <p className="text-amber-700 mt-1">
+              {result.unplacedPieces.map((p) => letterLabels.get(p.id) || p.label).join(", ")} won't fit
+              on a {settings.sheetWidth}×{settings.sheetHeight}mm sheet. Consider using larger sheets.
             </p>
           </div>
         </div>
       )}
 
-      <div className="space-y-4 overflow-x-auto">
-        {result.sheets.map((sheet, sheetIndex) => (
-          <div key={sheet.id} className="inline-block">
-            <div className="text-xs text-gray-500 mb-1">
-              Sheet {sheetIndex + 1} — {100 - sheet.wastePercent}% used
+      {/* Efficiency tip */}
+      {result.totalWaste > 30 && result.unplacedPieces.length === 0 && (
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-3">
+          <Info className="text-blue-500 flex-shrink-0 mt-0.5" size={16} />
+          <p className="text-sm text-blue-700">
+            <strong>Tip:</strong> Adjusting panel dimensions slightly or using different sheet sizes 
+            could improve material utilization.
+          </p>
+        </div>
+      )}
+
+      {/* Sheet Diagrams */}
+      <div className="space-y-6">
+        {result.sheets.map((sheet, sheetIndex) => {
+          const utilization = 100 - sheet.wastePercent;
+          const sheetEfficiency = getEfficiencyRating(sheet.wastePercent);
+          
+          return (
+            <div key={sheet.id} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+              {/* Sheet Header */}
+              <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex items-center justify-center w-7 h-7 bg-slate-700 text-white text-sm font-semibold rounded-full">
+                    {sheetIndex + 1}
+                  </span>
+                  <span className="font-medium text-slate-700">Sheet {sheetIndex + 1}</span>
+                </div>
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="text-slate-500">
+                    {sheet.placements.length} piece{sheet.placements.length !== 1 ? 's' : ''}
+                  </span>
+                  <span className={`font-medium ${sheetEfficiency.color}`}>
+                    {utilization}% used
+                  </span>
+                </div>
+              </div>
+              
+              {/* Sheet Diagram */}
+              <div className="p-4 flex justify-center">
+                <svg
+                  width={scaledSheetWidth + 2}
+                  height={scaledSheetHeight + 2}
+                  className="drop-shadow-sm"
+                >
+                  {/* Sheet background with wood texture */}
+                  <defs>
+                    <pattern id={`wood-${sheet.id}`} patternUnits="userSpaceOnUse" width="200" height="200">
+                      <rect width="200" height="200" fill="#f7f3ed" />
+                      <line x1="0" y1="12" x2="200" y2="14" stroke="#ebe4d8" strokeWidth="1" opacity="0.7" />
+                      <line x1="0" y1="38" x2="200" y2="36" stroke="#ebe4d8" strokeWidth="0.5" opacity="0.5" />
+                      <line x1="0" y1="65" x2="200" y2="67" stroke="#ebe4d8" strokeWidth="1" opacity="0.7" />
+                      <line x1="0" y1="95" x2="200" y2="94" stroke="#ebe4d8" strokeWidth="0.5" opacity="0.5" />
+                      <line x1="0" y1="120" x2="200" y2="122" stroke="#ebe4d8" strokeWidth="1" opacity="0.7" />
+                      <line x1="0" y1="150" x2="200" y2="148" stroke="#ebe4d8" strokeWidth="0.5" opacity="0.5" />
+                      <line x1="0" y1="175" x2="200" y2="177" stroke="#ebe4d8" strokeWidth="1" opacity="0.7" />
+                    </pattern>
+                    <filter id="piece-shadow" x="-10%" y="-10%" width="120%" height="120%">
+                      <feDropShadow dx="0" dy="1" stdDeviation="1" floodOpacity="0.15"/>
+                    </filter>
+                  </defs>
+                  
+                  {/* Sheet outline */}
+                  <rect
+                    x={1}
+                    y={1}
+                    width={scaledSheetWidth}
+                    height={scaledSheetHeight}
+                    fill={`url(#wood-${sheet.id})`}
+                    stroke="#c4b5a0"
+                    strokeWidth={1.5}
+                    rx={2}
+                  />
+
+                  {/* Placed pieces */}
+                  {sheet.placements.map((placement) => {
+                    const x = placement.x * scale + 1;
+                    const y = placement.y * scale + 1;
+                    const w = placement.width * scale;
+                    const h = placement.height * scale;
+                    const letter = placement.letter || "?";
+
+                    return (
+                      <g key={placement.id} filter="url(#piece-shadow)">
+                        {/* Panel rectangle - clean wood color */}
+                        <rect
+                          x={x}
+                          y={y}
+                          width={w}
+                          height={h}
+                          fill="#fdfcfa"
+                          stroke="#64748b"
+                          strokeWidth={1.5}
+                          rx={2}
+                        />
+                        
+                        {/* Subtle inner highlight */}
+                        <rect
+                          x={x + 2}
+                          y={y + 2}
+                          width={w - 4}
+                          height={h - 4}
+                          fill="none"
+                          stroke="#fff"
+                          strokeWidth={1}
+                          rx={1}
+                          opacity={0.5}
+                        />
+                        
+                        {/* Letter label badge */}
+                        <circle
+                          cx={x + 14}
+                          cy={y + 14}
+                          r={10}
+                          fill="#1e3a5f"
+                        />
+                        <text
+                          x={x + 14}
+                          y={y + 18}
+                          textAnchor="middle"
+                          fontSize={11}
+                          fill="white"
+                          fontWeight="600"
+                          fontFamily="system-ui, sans-serif"
+                        >
+                          {letter}
+                        </text>
+                        
+                        {/* Dimensions - centered in piece */}
+                        {w > 55 && h > 35 && (
+                          <text
+                            x={x + w / 2}
+                            y={y + h / 2 + 4}
+                            textAnchor="middle"
+                            dominantBaseline="middle"
+                            fontSize={10}
+                            fill="#475569"
+                            fontWeight="500"
+                            fontFamily="system-ui, sans-serif"
+                          >
+                            {placement.width}×{placement.height}
+                          </text>
+                        )}
+                        
+                        {/* Rotation indicator */}
+                        {placement.rotated && w > 45 && (
+                          <g transform={`translate(${x + w - 16}, ${y + 8})`}>
+                            <text
+                              fontSize={11}
+                              fill="#94a3b8"
+                              fontFamily="system-ui, sans-serif"
+                            >
+                              ↻
+                            </text>
+                          </g>
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
             </div>
-            <svg
-              width={scaledSheetWidth + 2}
-              height={scaledSheetHeight + 2}
-              className="border border-gray-300 bg-gray-100"
-            >
-              {/* Sheet background */}
-              <rect
-                x={1}
-                y={1}
-                width={scaledSheetWidth}
-                height={scaledSheetHeight}
-                fill="#f3f4f6"
-                stroke="#d1d5db"
-                strokeWidth={1}
-              />
-
-              {/* Placed pieces */}
-              {sheet.placements.map((placement, pieceIndex) => {
-                const x = placement.x * scale + 1;
-                const y = placement.y * scale + 1;
-                const w = placement.width * scale;
-                const h = placement.height * scale;
-                const color = PIECE_COLORS[pieceIndex % PIECE_COLORS.length];
-
-                return (
-                  <g key={placement.id}>
-                    <rect
-                      x={x}
-                      y={y}
-                      width={w}
-                      height={h}
-                      fill={color}
-                      stroke="#64748b"
-                      strokeWidth={1}
-                    />
-                    {/* Label if piece is big enough */}
-                    {w > 40 && h > 20 && (
-                      <text
-                        x={x + w / 2}
-                        y={y + h / 2}
-                        textAnchor="middle"
-                        dominantBaseline="middle"
-                        fontSize={Math.min(10, w / 8)}
-                        fill="#1f2937"
-                      >
-                        {placement.label.length > 12
-                          ? placement.label.slice(0, 10) + "..."
-                          : placement.label}
-                      </text>
-                    )}
-                    {/* Dimensions if piece is big enough */}
-                    {w > 50 && h > 35 && (
-                      <text
-                        x={x + w / 2}
-                        y={y + h / 2 + 10}
-                        textAnchor="middle"
-                        dominantBaseline="middle"
-                        fontSize={8}
-                        fill="#6b7280"
-                      >
-                        {placement.width}×{placement.height}
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Sheet size info */}
-      <div className="mt-3 text-xs text-gray-400">
-        Sheet size: {settings.sheetWidth} × {settings.sheetHeight} mm
+      {/* Footer info */}
+      <div className="flex items-center justify-between text-xs text-slate-500 pt-2">
+        <div className="flex items-center gap-1">
+          <Info size={12} />
+          <span>Sheet: {settings.sheetWidth}×{settings.sheetHeight}mm • Thickness: {settings.thickness}mm</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <CheckCircle2 size={12} className="text-green-500" />
+          <span>Includes 3mm kerf allowance</span>
+        </div>
       </div>
     </div>
   );

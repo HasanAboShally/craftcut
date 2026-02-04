@@ -243,7 +243,11 @@ function WoodPanel({
 }
 
 // 3D Scene with all furniture panels
-function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: [number, number, number], size: number) => void }) {
+function FurnitureScene({
+  onBoundsCalculated,
+}: {
+  onBoundsCalculated?: (center: [number, number, number], size: number) => void;
+}) {
   const { panels, settings } = useDesignStore();
 
   const thickness = settings.thickness || 18;
@@ -252,7 +256,12 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
 
   // Convert 2D panels to 3D positions and sizes
   const { panels3D, center, maxDimension } = useMemo(() => {
-    if (panels.length === 0) return { panels3D: [], center: [0, 0, 0] as [number, number, number], maxDimension: 1 };
+    if (panels.length === 0)
+      return {
+        panels3D: [],
+        center: [0, 0, 0] as [number, number, number],
+        maxDimension: 1,
+      };
 
     // Both 2D and 3D use Y-UP (positive Y goes up)
     // 2D now shows TRUE dimensions (no visual enlargement)
@@ -277,16 +286,16 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
     const minY = Math.min(...panels.map((p) => p.y));
     const maxY = Math.max(...panels.map((p) => p.y + getTrueHeight(p)));
     const totalHeight = maxY - minY;
-    
+
     // Calculate center in 3D space
     const widthInUnits = (maxX - minX) * SCALE;
     const heightInUnits = totalHeight * SCALE;
     const depthInUnits = furnitureDepth * SCALE;
-    
+
     const centerX = 0;
     const centerY = (minY + totalHeight / 2) * SCALE;
     const centerZ = 0;
-    
+
     const maxDim = Math.max(widthInUnits, heightInUnits, depthInUnits);
 
     const result = panels.map((panel) => {
@@ -296,21 +305,21 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
       const panelH = panel.height * SCALE;
       const panelT = thickness * SCALE;
       const fullDepth = furnitureDepth * SCALE;
-      
+
       // Use panel's custom depth if set, otherwise use furniture depth
       const panelDepth = (panel.depth || furnitureDepth) * SCALE;
       const zAlign = panel.zAlign || "front";
 
       // X position: center the design around 0
       const totalWidth = maxX - minX;
-      const x3d = ((panel.x - minX) - totalWidth / 2) * SCALE;
+      const x3d = (panel.x - minX - totalWidth / 2) * SCALE;
 
       // Y position: panel.y is the TRUE BOTTOM of the panel in world coords
       // Both 2D and 3D use Y-up with TRUE dimensions
       // So the 3D center should be at panel.y + trueHeight/2
       const trueHeight = getTrueHeight(panel);
       const y3d = (panel.y + trueHeight / 2) * SCALE;
-      
+
       // Calculate Z position based on alignment
       // Z=0 is the front, positive Z goes to the back
       // Center of panel should be positioned based on alignment
@@ -370,11 +379,11 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
         }
       }
     });
-    
-    return { 
-      panels3D: result, 
+
+    return {
+      panels3D: result,
       center: [centerX, centerY, centerZ] as [number, number, number],
-      maxDimension: maxDim
+      maxDimension: maxDim,
     };
   }, [panels, thickness, furnitureDepth, SCALE]);
 
@@ -425,17 +434,23 @@ function FurnitureScene({ onBoundsCalculated }: { onBoundsCalculated?: (center: 
 }
 
 // Camera controller that auto-centers on furniture
-function CameraController({ target, distance }: { target: [number, number, number]; distance: number }) {
+function CameraController({
+  target,
+  distance,
+}: {
+  target: [number, number, number];
+  distance: number;
+}) {
   const { camera } = useThree();
   const controlsRef = useRef<any>(null);
-  
+
   useEffect(() => {
     if (controlsRef.current) {
       // Set the orbit target to the center of furniture
       controlsRef.current.target.set(target[0], target[1], target[2]);
       controlsRef.current.update();
     }
-    
+
     // Position camera based on furniture size
     const cameraDistance = Math.max(distance * 3, 5);
     camera.position.set(cameraDistance, cameraDistance * 0.8, cameraDistance);
@@ -460,13 +475,18 @@ function CameraController({ target, distance }: { target: [number, number, numbe
 
 export default function Preview3D() {
   const { panels } = useDesignStore();
-  const [cameraTarget, setCameraTarget] = useState<[number, number, number]>([0, 0, 0]);
+  const [cameraTarget, setCameraTarget] = useState<[number, number, number]>([
+    0, 0, 0,
+  ]);
   const [furnitureSize, setFurnitureSize] = useState(5);
 
-  const handleBoundsCalculated = useCallback((center: [number, number, number], size: number) => {
-    setCameraTarget(center);
-    setFurnitureSize(size);
-  }, []);
+  const handleBoundsCalculated = useCallback(
+    (center: [number, number, number], size: number) => {
+      setCameraTarget(center);
+      setFurnitureSize(size);
+    },
+    [],
+  );
 
   // Calculate dimensions for display
   const dimensions = useMemo(() => {
@@ -494,13 +514,20 @@ export default function Preview3D() {
 
       <div className="flex-1 bg-gradient-to-b from-slate-100 to-slate-200">
         {panels.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-gray-500">
-            <div className="text-center">
-              <Box size={48} className="mx-auto mb-4 opacity-30" />
-              <p className="text-lg mb-2">No panels to preview</p>
-              <p className="text-sm">
-                Add panels in the Design view to see them here in 3D
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center max-w-sm">
+              <div className="w-20 h-20 bg-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-4 transform rotate-12">
+                <Box size={40} className="text-slate-400 transform -rotate-12" />
+              </div>
+              <p className="text-lg font-medium text-gray-700 mb-2">No panels to preview</p>
+              <p className="text-sm text-gray-500 mb-4">
+                Switch to the Design view and add panels to see a 3D preview of your furniture.
               </p>
+              <div className="flex items-center justify-center gap-4 text-xs text-gray-400">
+                <span>🖱️ Rotate</span>
+                <span>🔍 Zoom</span>
+                <span>✋ Pan</span>
+              </div>
             </div>
           </div>
         ) : (

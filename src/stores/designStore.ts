@@ -16,14 +16,17 @@ interface ViewState {
 }
 
 interface DesignState {
+  // Current project ID (null for legacy single-project mode)
+  currentProjectId: string | null;
+  
   settings: Settings;
   panels: Panel[];
   stickyNotes: StickyNote[];
   selectedPanelIds: string[];
-  
+
   // View state (for preserving camera position between tabs)
   viewState: ViewState;
-  
+
   // Undo/Redo state
   history: HistoryEntry[];
   historyIndex: number;
@@ -31,7 +34,7 @@ interface DesignState {
   canRedo: boolean;
 
   // Panel actions
-  addPanel: () => void;
+  addPanel: (x?: number, y?: number, orientation?: "horizontal" | "vertical" | "back") => void;
   updatePanel: (id: string, updates: Partial<Panel>) => void;
   updatePanels: (ids: string[], updates: Partial<Panel>) => void;
   deletePanel: (id: string) => void;
@@ -48,7 +51,7 @@ interface DesignState {
 
   // Settings actions
   updateSettings: (updates: Partial<Settings>) => void;
-  
+
   // View actions
   updateViewState: (updates: Partial<ViewState>) => void;
 
@@ -56,7 +59,12 @@ interface DesignState {
   clearAll: () => void;
   loadDesign: (data: DesignData) => void;
   exportDesign: () => DesignData;
-  
+
+  // Project actions
+  loadProject: (projectId: string) => void;
+  saveProject: () => void;
+  newProject: (projectId: string, name?: string) => void;
+
   // Undo/Redo actions
   undo: () => void;
   redo: () => void;
@@ -84,6 +92,7 @@ const generateId = () =>
 export const useDesignStore = create<DesignState>()(
   persist(
     (set, get) => ({
+      currentProjectId: null,
       settings: { ...DEFAULT_SETTINGS },
       panels: [],
       stickyNotes: [],
@@ -108,16 +117,16 @@ export const useDesignStore = create<DesignState>()(
           panels: JSON.parse(JSON.stringify(state.panels)),
           settings: JSON.parse(JSON.stringify(state.settings)),
         };
-        
+
         // Remove any future history if we're not at the end
         const newHistory = state.history.slice(0, state.historyIndex + 1);
         newHistory.push(entry);
-        
+
         // Limit history size
         if (newHistory.length > MAX_HISTORY) {
           newHistory.shift();
         }
-        
+
         set({
           history: newHistory,
           historyIndex: newHistory.length - 1,
@@ -129,7 +138,7 @@ export const useDesignStore = create<DesignState>()(
       undo: () => {
         const state = get();
         if (state.historyIndex < 0) return;
-        
+
         // If at the end, save current state first so we can redo to it
         if (state.historyIndex === state.history.length - 1) {
           const currentEntry: HistoryEntry = {
@@ -139,10 +148,10 @@ export const useDesignStore = create<DesignState>()(
           const newHistory = [...state.history, currentEntry];
           set({ history: newHistory });
         }
-        
+
         const entry = state.history[state.historyIndex];
         if (!entry) return;
-        
+
         set({
           panels: JSON.parse(JSON.stringify(entry.panels)),
           settings: JSON.parse(JSON.stringify(entry.settings)),
@@ -155,12 +164,12 @@ export const useDesignStore = create<DesignState>()(
       redo: () => {
         const state = get();
         const nextIndex = state.historyIndex + 2; // +2 because historyIndex points to last saved, +1 is current, +2 is next
-        
+
         if (nextIndex >= state.history.length) return;
-        
+
         const entry = state.history[nextIndex];
         if (!entry) return;
-        
+
         set({
           panels: JSON.parse(JSON.stringify(entry.panels)),
           settings: JSON.parse(JSON.stringify(entry.settings)),
@@ -170,17 +179,20 @@ export const useDesignStore = create<DesignState>()(
         });
       },
 
-      addPanel: () => {
+      addPanel: (x?: number, y?: number, orientation?: "horizontal" | "vertical" | "back") => {
         get().saveToHistory();
+        const defaultX = 50 + (get().panels.length % 5) * 30;
+        const defaultY = 50 + Math.floor(get().panels.length / 5) * 30;
+        const orient = orientation ?? "horizontal";
         const newPanel: Panel = {
           id: generateId(),
           label: `Panel ${panelCounter++}`,
-          x: 50 + (get().panels.length % 5) * 30,
-          y: 50 + Math.floor(get().panels.length / 5) * 30,
+          x: x ?? defaultX,
+          y: y ?? defaultY,
           width: 600,
           height: 400,
           quantity: 1,
-          orientation: "horizontal",
+          orientation: orient,
         };
         set((state) => ({
           panels: [...state.panels, newPanel],
@@ -229,7 +241,11 @@ export const useDesignStore = create<DesignState>()(
           set((state) => {
             if (state.selectedPanelIds.includes(id)) {
               // Remove from selection if already selected
-              return { selectedPanelIds: state.selectedPanelIds.filter((pid) => pid !== id) };
+              return {
+                selectedPanelIds: state.selectedPanelIds.filter(
+                  (pid) => pid !== id,
+                ),
+              };
             } else {
               return { selectedPanelIds: [...state.selectedPanelIds, id] };
             }
@@ -255,7 +271,14 @@ export const useDesignStore = create<DesignState>()(
 
       addStickyNote: (x, y) => {
         const id = `note_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-        const colors = ["#fef08a", "#fde68a", "#bbf7d0", "#bfdbfe", "#fbcfe8", "#e9d5ff"];
+        const colors = [
+          "#fef08a",
+          "#fde68a",
+          "#bbf7d0",
+          "#bfdbfe",
+          "#fbcfe8",
+          "#e9d5ff",
+        ];
         const color = colors[Math.floor(Math.random() * colors.length)];
         set((state) => ({
           stickyNotes: [...state.stickyNotes, { id, x, y, text: "", color }],
@@ -266,7 +289,7 @@ export const useDesignStore = create<DesignState>()(
       updateStickyNote: (id, updates) => {
         set((state) => ({
           stickyNotes: state.stickyNotes.map((n) =>
-            n.id === id ? { ...n, ...updates } : n
+            n.id === id ? { ...n, ...updates } : n,
           ),
         }));
       },
@@ -313,15 +336,130 @@ export const useDesignStore = create<DesignState>()(
           panels: state.panels,
         };
       },
+
+      // Project management actions
+      loadProject: (projectId: string) => {
+        const storageKey = `craftcut_project_${projectId}`;
+        try {
+          const savedData = localStorage.getItem(storageKey);
+          if (savedData) {
+            const parsed = JSON.parse(savedData);
+            panelCounter = (parsed.panels?.length || 0) + 1;
+            set({
+              currentProjectId: projectId,
+              settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
+              panels: parsed.panels || [],
+              stickyNotes: parsed.stickyNotes || [],
+              selectedPanelIds: [],
+              viewState: parsed.viewState || { zoom: DEFAULT_ZOOM, panX: 0, panY: 0 },
+              history: [],
+              historyIndex: -1,
+              canUndo: false,
+              canRedo: false,
+            });
+          } else {
+            // New project with no saved data
+            set({
+              currentProjectId: projectId,
+              settings: { ...DEFAULT_SETTINGS },
+              panels: [],
+              stickyNotes: [],
+              selectedPanelIds: [],
+              viewState: { zoom: DEFAULT_ZOOM, panX: 0, panY: 0 },
+              history: [],
+              historyIndex: -1,
+              canUndo: false,
+              canRedo: false,
+            });
+            panelCounter = 1;
+          }
+        } catch (err) {
+          console.error("Failed to load project:", err);
+          // Reset to empty state
+          set({
+            currentProjectId: projectId,
+            settings: { ...DEFAULT_SETTINGS },
+            panels: [],
+            stickyNotes: [],
+            selectedPanelIds: [],
+            viewState: { zoom: DEFAULT_ZOOM, panX: 0, panY: 0 },
+            history: [],
+            historyIndex: -1,
+            canUndo: false,
+            canRedo: false,
+          });
+          panelCounter = 1;
+        }
+      },
+
+      saveProject: () => {
+        const state = get();
+        if (!state.currentProjectId) return;
+        
+        const storageKey = `craftcut_project_${state.currentProjectId}`;
+        const dataToSave = {
+          settings: state.settings,
+          panels: state.panels,
+          stickyNotes: state.stickyNotes,
+          viewState: state.viewState,
+        };
+        
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(dataToSave));
+        } catch (err) {
+          console.error("Failed to save project:", err);
+        }
+      },
+
+      newProject: (projectId: string, name?: string) => {
+        panelCounter = 1;
+        set({
+          currentProjectId: projectId,
+          settings: { ...DEFAULT_SETTINGS, projectName: name || "" },
+          panels: [],
+          stickyNotes: [],
+          selectedPanelIds: [],
+          viewState: { zoom: DEFAULT_ZOOM, panX: 0, panY: 0 },
+          history: [],
+          historyIndex: -1,
+          canUndo: false,
+          canRedo: false,
+        });
+      },
     }),
     {
       name: "craftcut_design",
       partialize: (state) => ({
+        currentProjectId: state.currentProjectId,
         settings: state.settings,
         panels: state.panels,
         stickyNotes: state.stickyNotes,
         // Don't persist history - it would be too large
       }),
+      // Create backup before any storage operation
+      onRehydrateStorage: () => {
+        // Backup existing data before rehydration
+        try {
+          const existingData = localStorage.getItem("craftcut_design");
+          if (existingData) {
+            const parsed = JSON.parse(existingData);
+            // Only backup if there's actual panel data
+            if (parsed.state?.panels?.length > 0) {
+              const backupKey = `craftcut_backup_${Date.now()}`;
+              localStorage.setItem(backupKey, existingData);
+              console.log(`Backup created: ${backupKey} with ${parsed.state.panels.length} panels`);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to create backup:", e);
+        }
+        
+        return (state, error) => {
+          if (error) {
+            console.error("Failed to rehydrate state:", error);
+          }
+        };
+      },
     },
   ),
 );
