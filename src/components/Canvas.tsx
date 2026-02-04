@@ -2332,9 +2332,9 @@ export default function Canvas() {
           width={hitArea.width}
           height={hitArea.height}
           fill="transparent"
-          style={{ cursor: spaceHeld || tool === "pan" ? "grab" : "move" }}
+          style={{ cursor: spaceHeld || tool === "pan" ? "grab" : tool === "measure" ? "crosshair" : "move" }}
           onMouseDown={(e) => {
-            if (!spaceHeld && tool !== "pan") handleMouseDown(e, panel, "drag");
+            if (!spaceHeld && tool !== "pan" && tool !== "measure") handleMouseDown(e, panel, "drag");
           }}
           onMouseEnter={() => setHoveredPanelId(panel.id)}
           onMouseLeave={() => setHoveredPanelId(null)}
@@ -2429,7 +2429,9 @@ export default function Canvas() {
                         ? "ns-resize"
                         : "ew-resize",
                 }}
-                onMouseDown={(e) => handleMouseDown(e, panel, "resize", corner)}
+                onMouseDown={(e) => {
+                  if (tool !== "measure") handleMouseDown(e, panel, "resize", corner);
+                }}
               />
             );
           })}
