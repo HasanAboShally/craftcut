@@ -10,6 +10,7 @@ import { useDesignStore } from "../stores/designStore";
 import { useProjectsStore } from "../stores/projectsStore";
 import Editor from "./Editor";
 import ProjectsHome from "./ProjectsHome";
+import { InstallPrompt } from "./ui";
 
 type View = "home" | "editor";
 
@@ -216,8 +217,18 @@ export default function App() {
 
   // Provide goHome function to Editor via context or props
   if (view === "editor" && currentProjectId) {
-    return <Editor onGoHome={handleGoHome} projectId={currentProjectId} />;
+    return (
+      <>
+        <Editor onGoHome={handleGoHome} projectId={currentProjectId} />
+        <InstallPrompt />
+      </>
+    );
   }
 
-  return <ProjectsHome onOpenProject={handleOpenProject} />;
+  return (
+    <>
+      <ProjectsHome onOpenProject={handleOpenProject} />
+      <InstallPrompt />
+    </>
+  );
 }

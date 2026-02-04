@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e40af"/>
+      <stop offset="100%" style="stop-color:#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="64" fill="url(#bg)"/>
+  <!-- Wood panel 1 -->
+  <rect x="80" y="120" width="160" height="272" rx="8" fill="#f5f0e8" stroke="#d4a574" stroke-width="4"/>
+  <line x1="100" y1="140" x2="220" y2="140" stroke="#e8dcc8" stroke-width="2"/>
+  <line x1="100" y1="180" x2="220" y2="182" stroke="#e8dcc8" stroke-width="1.5"/>
+  <line x1="100" y1="220" x2="220" y2="218" stroke="#e8dcc8" stroke-width="2"/>
+  <line x1="100" y1="260" x2="220" y2="262" stroke="#e8dcc8" stroke-width="1.5"/>
+  <line x1="100" y1="300" x2="220" y2="300" stroke="#e8dcc8" stroke-width="2"/>
+  <line x1="100" y1="340" x2="220" y2="338" stroke="#e8dcc8" stroke-width="1.5"/>
+  <line x1="100" y1="370" x2="220" y2="372" stroke="#e8dcc8" stroke-width="2"/>
+  <!-- Wood panel 2 -->
+  <rect x="272" y="120" width="160" height="140" rx="8" fill="#f5f0e8" stroke="#d4a574" stroke-width="4"/>
+  <line x1="292" y1="140" x2="412" y2="140" stroke="#e8dcc8" stroke-width="2"/>
+  <line x1="292" y1="170" x2="412" y2="172" stroke="#e8dcc8" stroke-width="1.5"/>
+  <line x1="292" y1="200" x2="412" y2="198" stroke="#e8dcc8" stroke-width="2"/>
+  <line x1="292" y1="230" x2="412" y2="232" stroke="#e8dcc8" stroke-width="1.5"/>
+  <!-- Wood panel 3 -->
+  <rect x="272" y="280" width="160" height="112" rx="8" fill="#f5f0e8" stroke="#d4a574" stroke-width="4"/>
+  <line x1="292" y1="300" x2="412" y2="300" stroke="#e8dcc8" stroke-width="2"/>
+  <line x1="292" y1="330" x2="412" y2="332" stroke="#e8dcc8" stroke-width="1.5"/>
+  <line x1="292" y1="360" x2="412" y2="358" stroke="#e8dcc8" stroke-width="2"/>
+  <!-- Letter badges -->
+  <circle cx="120" cy="160" r="24" fill="#1e3a5f"/>
+  <text x="120" y="168" font-family="system-ui, sans-serif" font-size="24" font-weight="bold" fill="white" text-anchor="middle">A</text>
+  <circle cx="312" cy="160" r="24" fill="#1e3a5f"/>
+  <text x="312" y="168" font-family="system-ui, sans-serif" font-size="24" font-weight="bold" fill="white" text-anchor="middle">B</text>
+  <circle cx="312" cy="320" r="24" fill="#1e3a5f"/>
+  <text x="312" y="328" font-family="system-ui, sans-serif" font-size="24" font-weight="bold" fill="white" text-anchor="middle">C</text>
+  <!-- Scissors/cut indicator -->
+  <g transform="translate(400, 60)">
+    <path d="M0 20 L40 0 M0 0 L40 20" stroke="white" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="0" cy="0" r="12" fill="none" stroke="white" stroke-width="3"/>
+    <circle cx="0" cy="20" r="12" fill="none" stroke="white" stroke-width="3"/>
+  </g>
+</svg>

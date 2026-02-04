@@ -8,10 +8,13 @@ import {
   PanelRightClose,
   PanelRightOpen,
   PenTool,
+  Redo2,
   Trash2,
+  Undo2,
   Upload,
 } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { exportToCSV, exportToJSON, importFromJSON } from "../lib/export";
 import { calculateCutList } from "../lib/optimizer";
 import { useDesignStore } from "../stores/designStore";
@@ -34,13 +37,16 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  const { addPanel, clearAll, panels, settings, exportDesign, loadDesign, saveProject } =
+  const { addPanel, clearAll, panels, settings, exportDesign, loadDesign, saveProject, undo, redo, canUndo, canRedo } =
     useDesignStore();
   const { updateProject, getProject } = useProjectsStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
   const keyboardHelp = useKeyboardHelp();
+
+  // Enable keyboard shortcuts
+  useKeyboardShortcuts(activeTab === "design");
 
   // Get current project name
   const currentProject = projectId ? getProject(projectId) : null;
@@ -267,6 +273,28 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
                 </button>
               </div>
             )}
+          </div>
+
+          {/* Undo/Redo */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={undo}
+              disabled={!canUndo}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
+              aria-label="Undo (Ctrl+Z)"
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo2 size={16} aria-hidden="true" />
+            </button>
+            <button
+              onClick={redo}
+              disabled={!canRedo}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
+              aria-label="Redo (Ctrl+Shift+Z)"
+              title="Redo (Ctrl+Shift+Z)"
+            >
+              <Redo2 size={16} aria-hidden="true" />
+            </button>
           </div>
 
           <button

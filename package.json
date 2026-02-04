@@ -17,6 +17,7 @@
     "@types/react": "^19.2.10",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.182.0",
+    "@vite-pwa/astro": "^1.2.0",
     "astro": "^5.17.1",
     "lucide-react": "^0.563.0",
     "react": "^19.2.4",
@@ -25,9 +26,11 @@
     "three": "^0.182.0",
     "toposort": "^2.0.2",
     "typescript": "^5.9.3",
+    "workbox-window": "^7.4.0",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
-    "@types/toposort": "^2.0.7"
+    "@types/toposort": "^2.0.7",
+    "sharp": "^0.34.5"
   }
 }
