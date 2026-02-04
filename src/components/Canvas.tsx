@@ -3338,35 +3338,43 @@ export default function Canvas() {
             
             {/* Distance label */}
             <g transform={`translate(${labelX}, ${labelY})`}>
-              <rect
-                x={-40 / zoom}
-                y={-24 / zoom}
-                width={80 / zoom}
-                height={measurePoints.length === 2 ? 44 / zoom : 20 / zoom}
-                fill="#10b981"
-                rx={4 / zoom}
-              />
-              <text
-                x={0}
-                y={-8 / zoom}
-                fontSize={fontSize}
-                fill="white"
-                textAnchor="middle"
-                fontWeight={600}
-              >
-                {Math.round(distance)} mm
-              </text>
-              {measurePoints.length === 2 && (deltaX > 10 || deltaY > 10) && (
-                <text
-                  x={0}
-                  y={10 / zoom}
-                  fontSize={fontSize * 0.85}
-                  fill="rgba(255,255,255,0.8)"
-                  textAnchor="middle"
-                >
-                  {Math.round(deltaX)}×{Math.round(deltaY)}
-                </text>
-              )}
+              {/* Only show extended label with dimensions if it's a diagonal (both deltas > 10) */}
+              {(() => {
+                const showDimensions = measurePoints.length === 2 && deltaX > 10 && deltaY > 10;
+                return (
+                  <>
+                    <rect
+                      x={-40 / zoom}
+                      y={showDimensions ? -24 / zoom : -12 / zoom}
+                      width={80 / zoom}
+                      height={showDimensions ? 44 / zoom : 24 / zoom}
+                      fill="#10b981"
+                      rx={4 / zoom}
+                    />
+                    <text
+                      x={0}
+                      y={showDimensions ? -8 / zoom : 4 / zoom}
+                      fontSize={fontSize}
+                      fill="white"
+                      textAnchor="middle"
+                      fontWeight={600}
+                    >
+                      {Math.round(distance)} mm
+                    </text>
+                    {showDimensions && (
+                      <text
+                        x={0}
+                        y={10 / zoom}
+                        fontSize={fontSize * 0.85}
+                        fill="rgba(255,255,255,0.8)"
+                        textAnchor="middle"
+                      >
+                        {Math.round(deltaX)}×{Math.round(deltaY)}
+                      </text>
+                    )}
+                  </>
+                );
+              })()}
             </g>
           </>
         )}
