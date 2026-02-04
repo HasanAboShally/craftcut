@@ -683,6 +683,102 @@ export default function Canvas() {
     [getSnapPoints, findEqualSpacingSnaps, zoom],
   );
 
+  // Snap a point to panel edges/corners for measurement tool
+  const snapMeasurePoint = useCallback(
+    (worldX: number, worldY: number, constrainToStraight: boolean, startPoint?: { x: number; y: number }) => {
+      const MEASURE_SNAP_THRESHOLD = 15 / zoom;
+      let snappedX = worldX;
+      let snappedY = worldY;
+      let snappedToPanel = false;
+
+      // Collect all panel edge points
+      const snapTargets: { x: number; y: number; type: string }[] = [];
+      
+      panels.forEach((panel) => {
+        const dims = getTrueDimensions(panel, settings.thickness);
+        const left = panel.x;
+        const right = panel.x + dims.width;
+        const bottom = panel.y;
+        const top = panel.y + dims.height;
+        const centerX = (left + right) / 2;
+        const centerY = (bottom + top) / 2;
+
+        // Corners
+        snapTargets.push({ x: left, y: bottom, type: "corner" });
+        snapTargets.push({ x: right, y: bottom, type: "corner" });
+        snapTargets.push({ x: left, y: top, type: "corner" });
+        snapTargets.push({ x: right, y: top, type: "corner" });
+        
+        // Edge midpoints
+        snapTargets.push({ x: centerX, y: bottom, type: "edge" });
+        snapTargets.push({ x: centerX, y: top, type: "edge" });
+        snapTargets.push({ x: left, y: centerY, type: "edge" });
+        snapTargets.push({ x: right, y: centerY, type: "edge" });
+        
+        // Center
+        snapTargets.push({ x: centerX, y: centerY, type: "center" });
+      });
+
+      // Find closest snap target
+      let minDist = MEASURE_SNAP_THRESHOLD;
+      for (const target of snapTargets) {
+        const dist = Math.sqrt(Math.pow(target.x - worldX, 2) + Math.pow(target.y - worldY, 2));
+        if (dist < minDist) {
+          minDist = dist;
+          snappedX = target.x;
+          snappedY = target.y;
+          snappedToPanel = true;
+        }
+      }
+
+      // Constrain to straight line (horizontal or vertical) unless shift is held
+      if (constrainToStraight && startPoint) {
+        const dx = Math.abs(snappedX - startPoint.x);
+        const dy = Math.abs(snappedY - startPoint.y);
+        
+        if (dx > dy) {
+          // More horizontal - snap to horizontal line
+          snappedY = startPoint.y;
+        } else {
+          // More vertical - snap to vertical line
+          snappedX = startPoint.x;
+        }
+        
+        // After constraining to axis, try to snap to panel edges on that axis
+        if (dx > dy) {
+          // Horizontal line - look for vertical edges at this Y
+          let minXDist = MEASURE_SNAP_THRESHOLD;
+          for (const target of snapTargets) {
+            if (Math.abs(target.y - snappedY) < MEASURE_SNAP_THRESHOLD) {
+              const xDist = Math.abs(target.x - worldX);
+              if (xDist < minXDist) {
+                minXDist = xDist;
+                snappedX = target.x;
+                snappedToPanel = true;
+              }
+            }
+          }
+        } else {
+          // Vertical line - look for horizontal edges at this X
+          let minYDist = MEASURE_SNAP_THRESHOLD;
+          for (const target of snapTargets) {
+            if (Math.abs(target.x - snappedX) < MEASURE_SNAP_THRESHOLD) {
+              const yDist = Math.abs(target.y - worldY);
+              if (yDist < minYDist) {
+                minYDist = yDist;
+                snappedY = target.y;
+                snappedToPanel = true;
+              }
+            }
+          }
+        }
+      }
+
+      return { x: snappedX, y: snappedY, snapped: snappedToPanel };
+    },
+    [panels, settings.thickness, zoom],
+  );
+
   // ===========================================================================
   // EFFECTS
   // ===========================================================================
@@ -963,7 +1059,10 @@ export default function Canvas() {
       if (tool === "measure" && measurePoints.length === 1) {
         const point = getSVGPoint(e);
         const worldPoint = screenToWorld(point.x, point.y);
-        setMeasurePreview({ x: worldPoint.x, y: worldPoint.y });
+        // Shift key allows free (diagonal) measurement
+        const constrainToStraight = !shiftHeld;
+        const snapped = snapMeasurePoint(worldPoint.x, worldPoint.y, constrainToStraight, measurePoints[0]);
+        setMeasurePreview({ x: snapped.x, y: snapped.y });
         return;
       }
       
@@ -1197,6 +1296,8 @@ export default function Canvas() {
       updateStickyNote,
       tool,
       measurePoints,
+      shiftHeld,
+      snapMeasurePoint,
     ],
   );
 
@@ -1244,16 +1345,22 @@ export default function Canvas() {
         const point = getSVGPoint(e);
         const worldPoint = screenToWorld(point.x, point.y);
         
+        // Shift key allows free (diagonal) measurement, otherwise constrain to straight
+        const constrainToStraight = !shiftHeld;
+        
         if (measurePoints.length === 0) {
-          // First click - set start point
-          setMeasurePoints([{ x: worldPoint.x, y: worldPoint.y }]);
+          // First click - snap to panel edges
+          const snapped = snapMeasurePoint(worldPoint.x, worldPoint.y, false);
+          setMeasurePoints([{ x: snapped.x, y: snapped.y }]);
         } else if (measurePoints.length === 1) {
-          // Second click - complete the measurement
-          setMeasurePoints([measurePoints[0], { x: worldPoint.x, y: worldPoint.y }]);
+          // Second click - snap and constrain
+          const snapped = snapMeasurePoint(worldPoint.x, worldPoint.y, constrainToStraight, measurePoints[0]);
+          setMeasurePoints([measurePoints[0], { x: snapped.x, y: snapped.y }]);
           setMeasurePreview(null);
         } else {
           // Third click - start new measurement
-          setMeasurePoints([{ x: worldPoint.x, y: worldPoint.y }]);
+          const snapped = snapMeasurePoint(worldPoint.x, worldPoint.y, false);
+          setMeasurePoints([{ x: snapped.x, y: snapped.y }]);
         }
         return;
       }
@@ -1268,7 +1375,7 @@ export default function Canvas() {
       }
       if (e.target === svgRef.current) selectPanel(null);
     },
-    [selectPanel, stickyNoteTool, tool, measurePoints, getSVGPoint, screenToWorld, addStickyNote],
+    [selectPanel, stickyNoteTool, tool, measurePoints, shiftHeld, getSVGPoint, screenToWorld, addStickyNote, snapMeasurePoint],
   );
 
   // Auto-stretch panel to fit between adjacent panels of opposite orientation
@@ -3103,21 +3210,23 @@ export default function Canvas() {
     
     const lineWidth = 2 / zoom;
     const dotRadius = 5 / zoom;
+    const snapIndicatorRadius = 8 / zoom;
     const fontSize = 12 / zoom;
-    const labelPadding = 6 / zoom;
     
     // Calculate end point (either second click or preview)
     const startPoint = measurePoints[0];
     const endPoint = measurePoints[1] || measurePreview;
     
-    if (!startPoint) return null;
+    // Check if points are snapped to panels
+    const isStartSnapped = startPoint ? snapMeasurePoint(startPoint.x, startPoint.y, false).snapped : false;
+    const isEndSnapped = endPoint ? snapMeasurePoint(endPoint.x, endPoint.y, false).snapped : false;
     
     // Convert to screen Y
-    const startScreenY = worldToScreenY(startPoint.y);
+    const startScreenY = startPoint ? worldToScreenY(startPoint.y) : 0;
     const endScreenY = endPoint ? worldToScreenY(endPoint.y) : startScreenY;
     
     // Calculate distance
-    const distance = endPoint 
+    const distance = endPoint && startPoint
       ? Math.sqrt(
           Math.pow(endPoint.x - startPoint.x, 2) + 
           Math.pow(endPoint.y - startPoint.y, 2)
@@ -3125,27 +3234,73 @@ export default function Canvas() {
       : 0;
     
     // Calculate horizontal and vertical components
-    const deltaX = endPoint ? Math.abs(endPoint.x - startPoint.x) : 0;
-    const deltaY = endPoint ? Math.abs(endPoint.y - startPoint.y) : 0;
+    const deltaX = endPoint && startPoint ? Math.abs(endPoint.x - startPoint.x) : 0;
+    const deltaY = endPoint && startPoint ? Math.abs(endPoint.y - startPoint.y) : 0;
+    
+    // Determine if constrained to straight line
+    const isStraightLine = startPoint && endPoint && (deltaX < 1 || deltaY < 1);
     
     // Label position (midpoint)
-    const labelX = endPoint ? (startPoint.x + endPoint.x) / 2 : startPoint.x;
+    const labelX = endPoint && startPoint ? (startPoint.x + endPoint.x) / 2 : (startPoint?.x || 0);
     const labelY = endPoint ? (startScreenY + endScreenY) / 2 : startScreenY;
     
     return (
       <g className="measure-tool">
+        {/* Snap indicators for all panel corners/edges when measuring */}
+        {measurePoints.length < 2 && panels.map((panel) => {
+          const dims = getTrueDimensions(panel, settings.thickness);
+          const points = [
+            { x: panel.x, y: panel.y },
+            { x: panel.x + dims.width, y: panel.y },
+            { x: panel.x, y: panel.y + dims.height },
+            { x: panel.x + dims.width, y: panel.y + dims.height },
+            { x: panel.x + dims.width / 2, y: panel.y },
+            { x: panel.x + dims.width / 2, y: panel.y + dims.height },
+            { x: panel.x, y: panel.y + dims.height / 2 },
+            { x: panel.x + dims.width, y: panel.y + dims.height / 2 },
+          ];
+          
+          return points.map((pt, i) => (
+            <circle
+              key={`snap-${panel.id}-${i}`}
+              cx={pt.x}
+              cy={worldToScreenY(pt.y)}
+              r={3 / zoom}
+              fill="none"
+              stroke="#10b981"
+              strokeWidth={1 / zoom}
+              opacity={0.4}
+            />
+          ));
+        })}
+        
         {/* Start point */}
-        <circle
-          cx={startPoint.x}
-          cy={startScreenY}
-          r={dotRadius}
-          fill="#10b981"
-          stroke="white"
-          strokeWidth={2 / zoom}
-        />
+        {startPoint && (
+          <>
+            {isStartSnapped && (
+              <circle
+                cx={startPoint.x}
+                cy={startScreenY}
+                r={snapIndicatorRadius}
+                fill="none"
+                stroke="#10b981"
+                strokeWidth={2 / zoom}
+                opacity={0.5}
+              />
+            )}
+            <circle
+              cx={startPoint.x}
+              cy={startScreenY}
+              r={dotRadius}
+              fill="#10b981"
+              stroke="white"
+              strokeWidth={2 / zoom}
+            />
+          </>
+        )}
         
         {/* Line to end point or preview */}
-        {endPoint && (
+        {startPoint && endPoint && (
           <>
             <line
               x1={startPoint.x}
@@ -3157,12 +3312,23 @@ export default function Canvas() {
               strokeDasharray={measurePoints.length < 2 ? `${5 / zoom} ${3 / zoom}` : "none"}
             />
             
-            {/* End point */}
+            {/* End point with snap indicator */}
+            {isEndSnapped && (
+              <circle
+                cx={endPoint.x}
+                cy={endScreenY}
+                r={snapIndicatorRadius}
+                fill="none"
+                stroke="#10b981"
+                strokeWidth={2 / zoom}
+                opacity={0.5}
+              />
+            )}
             <circle
               cx={endPoint.x}
               cy={endScreenY}
               r={dotRadius}
-              fill={measurePoints.length < 2 ? "#10b981" : "#10b981"}
+              fill="#10b981"
               stroke="white"
               strokeWidth={2 / zoom}
               opacity={measurePoints.length < 2 ? 0.7 : 1}
@@ -3203,15 +3369,15 @@ export default function Canvas() {
           </>
         )}
         
-        {/* Instructions */}
-        {measurePoints.length === 0 && (
+        {/* Instructions - show when no points yet */}
+        {!startPoint && (
           <text
-            x={startPoint.x + 15 / zoom}
-            y={startScreenY}
+            x={viewBoxX + 20 / zoom}
+            y={viewBoxY + 30 / zoom}
             fontSize={fontSize}
             fill="#10b981"
           >
-            Click to start measuring
+            Click panel edges to measure • Hold ⇧ for diagonal
           </text>
         )}
       </g>
