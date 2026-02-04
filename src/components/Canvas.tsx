@@ -683,6 +683,25 @@ export default function Canvas() {
     [getSnapPoints, findEqualSpacingSnaps, zoom],
   );
 
+  // Find which panel contains a given point (if any)
+  const findPanelAtPoint = useCallback(
+    (worldX: number, worldY: number): string | null => {
+      for (const panel of panels) {
+        const dims = getTrueDimensions(panel, settings.thickness);
+        const left = panel.x;
+        const right = panel.x + dims.width;
+        const bottom = panel.y;
+        const top = panel.y + dims.height;
+        
+        if (worldX >= left && worldX <= right && worldY >= bottom && worldY <= top) {
+          return panel.id;
+        }
+      }
+      return null;
+    },
+    [panels, settings.thickness],
+  );
+
   // Snap a point to panel edges/corners for measurement tool
   // Returns the snapped point and which panel it belongs to
   const snapMeasurePoint = useCallback(
@@ -691,7 +710,9 @@ export default function Canvas() {
       let snappedX = worldX;
       let snappedY = worldY;
       let snappedToPanel = false;
-      let snappedPanelId: string | null = null;
+      
+      // First check if point is inside any panel
+      let snappedPanelId: string | null = findPanelAtPoint(worldX, worldY);
 
       // Collect all panel edge points with panel ID
       const snapTargets: { x: number; y: number; type: string; panelId: string }[] = [];
@@ -781,7 +802,7 @@ export default function Canvas() {
 
       return { x: snappedX, y: snappedY, snapped: snappedToPanel, panelId: snappedPanelId };
     },
-    [panels, settings.thickness, zoom],
+    [panels, settings.thickness, zoom, findPanelAtPoint],
   );
 
   // Calculate the inner gap between two panels
@@ -1418,37 +1439,51 @@ export default function Canvas() {
         // Shift key allows free (diagonal) measurement, otherwise constrain to straight
         const constrainToStraight = !shiftHeld;
         
+        // Check if clicking directly inside a panel (for panel-to-panel gap measurement)
+        const clickedPanelId = findPanelAtPoint(worldPoint.x, worldPoint.y);
+        
         if (measurePoints.length === 0) {
-          // First click - snap to panel edges
-          const snapped = snapMeasurePoint(worldPoint.x, worldPoint.y, false);
-          setMeasurePoints([{ x: snapped.x, y: snapped.y, panelId: snapped.panelId }]);
+          // First click
+          if (clickedPanelId) {
+            // Clicked inside a panel - store the panel ID for potential gap measurement
+            // But also snap to nearest edge point for visual feedback
+            const snapped = snapMeasurePoint(worldPoint.x, worldPoint.y, false);
+            setMeasurePoints([{ x: snapped.x, y: snapped.y, panelId: clickedPanelId }]);
+          } else {
+            // Clicked outside panels - snap to panel edges
+            const snapped = snapMeasurePoint(worldPoint.x, worldPoint.y, false);
+            setMeasurePoints([{ x: snapped.x, y: snapped.y, panelId: snapped.panelId }]);
+          }
         } else if (measurePoints.length === 1) {
-          // Second click - check if clicking on a different panel
-          const snapped = snapMeasurePoint(worldPoint.x, worldPoint.y, constrainToStraight, measurePoints[0]);
-          
+          // Second click
           const firstPanelId = measurePoints[0].panelId;
-          const secondPanelId = snapped.panelId;
           
           // If clicking on two different panels, auto-calculate the gap
-          if (firstPanelId && secondPanelId && firstPanelId !== secondPanelId) {
-            const gap = calculatePanelGap(firstPanelId, secondPanelId);
+          if (firstPanelId && clickedPanelId && firstPanelId !== clickedPanelId) {
+            const gap = calculatePanelGap(firstPanelId, clickedPanelId);
             if (gap) {
               setMeasurePoints([
                 { x: gap.start.x, y: gap.start.y, panelId: firstPanelId },
-                { x: gap.end.x, y: gap.end.y, panelId: secondPanelId }
+                { x: gap.end.x, y: gap.end.y, panelId: clickedPanelId }
               ]);
               setMeasurePreview(null);
               return;
             }
           }
           
-          // Otherwise use the snapped point
+          // Otherwise use the snapped point (for edge-to-edge or point measurement)
+          const snapped = snapMeasurePoint(worldPoint.x, worldPoint.y, constrainToStraight, measurePoints[0]);
           setMeasurePoints([measurePoints[0], { x: snapped.x, y: snapped.y, panelId: snapped.panelId }]);
           setMeasurePreview(null);
         } else {
           // Third click - start new measurement
-          const snapped = snapMeasurePoint(worldPoint.x, worldPoint.y, false);
-          setMeasurePoints([{ x: snapped.x, y: snapped.y, panelId: snapped.panelId }]);
+          if (clickedPanelId) {
+            const snapped = snapMeasurePoint(worldPoint.x, worldPoint.y, false);
+            setMeasurePoints([{ x: snapped.x, y: snapped.y, panelId: clickedPanelId }]);
+          } else {
+            const snapped = snapMeasurePoint(worldPoint.x, worldPoint.y, false);
+            setMeasurePoints([{ x: snapped.x, y: snapped.y, panelId: snapped.panelId }]);
+          }
         }
         return;
       }
@@ -1463,7 +1498,7 @@ export default function Canvas() {
       }
       if (e.target === svgRef.current) selectPanel(null);
     },
-    [selectPanel, stickyNoteTool, tool, measurePoints, shiftHeld, getSVGPoint, screenToWorld, addStickyNote, snapMeasurePoint, calculatePanelGap],
+    [selectPanel, stickyNoteTool, tool, measurePoints, shiftHeld, getSVGPoint, screenToWorld, addStickyNote, snapMeasurePoint, calculatePanelGap, findPanelAtPoint],
   );
 
   // Auto-stretch panel to fit between adjacent panels of opposite orientation
