@@ -7,6 +7,14 @@ export type PanelOrientation = "horizontal" | "vertical" | "back";
 // Z-axis alignment for panels with depth less than furniture depth
 export type ZAlignment = "front" | "back" | "center";
 
+// Edge banding configuration - which edges have banding applied
+export interface EdgeBanding {
+  top: boolean;
+  bottom: boolean;
+  left: boolean;
+  right: boolean;
+}
+
 export interface Panel {
   id: string;
   label: string;
@@ -18,7 +26,28 @@ export interface Panel {
   orientation: PanelOrientation;
   depth?: number; // Custom depth (Z dimension), defaults to furniture depth (400mm)
   zAlign?: ZAlignment; // Where to position panel in Z-axis when depth < furniture depth
+  edgeBanding?: EdgeBanding; // Which edges have banding
 }
+
+// Material presets
+export type MaterialType = "plywood" | "mdf" | "particleboard" | "melamine" | "solid_wood" | "custom";
+
+export interface MaterialPreset {
+  id: MaterialType;
+  name: string;
+  defaultThickness: number;
+  defaultColor: string;
+  description: string;
+}
+
+export const MATERIAL_PRESETS: MaterialPreset[] = [
+  { id: "plywood", name: "Plywood", defaultThickness: 18, defaultColor: "#E8D4B8", description: "Versatile, strong, good for structural parts" },
+  { id: "mdf", name: "MDF", defaultThickness: 18, defaultColor: "#D4C4A8", description: "Smooth surface, great for painting" },
+  { id: "particleboard", name: "Particleboard", defaultThickness: 16, defaultColor: "#C8B89C", description: "Budget-friendly, good for hidden parts" },
+  { id: "melamine", name: "Melamine", defaultThickness: 18, defaultColor: "#FFFFFF", description: "Pre-finished, easy to clean" },
+  { id: "solid_wood", name: "Solid Wood", defaultThickness: 20, defaultColor: "#C19A6B", description: "Premium, natural grain" },
+  { id: "custom", name: "Custom", defaultThickness: 18, defaultColor: "#E8D4B8", description: "Custom material settings" },
+];
 
 export interface Settings {
   thickness: number;
@@ -31,6 +60,10 @@ export interface Settings {
   // Cost calculation
   sheetPrice?: number; // Price per sheet in local currency
   currency?: string; // Currency symbol (default: $)
+  // Material
+  materialType?: MaterialType;
+  // Edge banding
+  edgeBandingPrice?: number; // Price per meter
 }
 
 export interface DesignData {

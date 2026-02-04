@@ -250,7 +250,7 @@ export default function ProductionView() {
     }
   };
 
-  // Calculate material cost
+  // Calculate material cost including edge banding
   const costEstimate = useMemo(() => {
     const result = optimizeCuts(
       panels,
@@ -261,18 +261,53 @@ export default function ProductionView() {
     );
     
     const sheetPrice = settings.sheetPrice || 0;
+    const edgeBandingPrice = settings.edgeBandingPrice || 0;
     const currency = settings.currency || '$';
     const totalSheets = result.totalSheets;
-    const totalCost = totalSheets * sheetPrice;
+    const sheetCost = totalSheets * sheetPrice;
     const wastePercent = result.totalWaste;
+    
+    // Calculate edge banding length
+    let edgeBandingLength = 0; // in mm
+    panels.forEach(panel => {
+      if (!panel.edgeBanding) return;
+      const qty = panel.quantity || 1;
+      const orientation = panel.orientation || 'horizontal';
+      const depth = panel.depth || settings.furnitureDepth || 400;
+      
+      let panelLength: number, panelWidth: number;
+      if (orientation === 'horizontal') {
+        panelLength = panel.width;
+        panelWidth = depth;
+      } else if (orientation === 'vertical') {
+        panelLength = panel.height;
+        panelWidth = depth;
+      } else {
+        panelLength = panel.width;
+        panelWidth = panel.height;
+      }
+      
+      if (panel.edgeBanding.top) edgeBandingLength += panelLength * qty;
+      if (panel.edgeBanding.bottom) edgeBandingLength += panelLength * qty;
+      if (panel.edgeBanding.left) edgeBandingLength += panelWidth * qty;
+      if (panel.edgeBanding.right) edgeBandingLength += panelWidth * qty;
+    });
+    
+    const edgeBandingMeters = edgeBandingLength / 1000;
+    const edgeBandingCost = edgeBandingMeters * edgeBandingPrice;
+    const totalCost = sheetCost + edgeBandingCost;
     
     return {
       totalSheets,
       sheetPrice,
+      sheetCost,
+      edgeBandingMeters,
+      edgeBandingPrice,
+      edgeBandingCost,
       totalCost,
       wastePercent,
       currency,
-      hasPrice: sheetPrice > 0,
+      hasPrice: sheetPrice > 0 || edgeBandingPrice > 0,
     };
   }, [panels, settings, dimensionToLetter]);
 
@@ -456,25 +491,62 @@ export default function ProductionView() {
                   </div>
                   <div>
                     <h3 className="font-semibold text-gray-800">Material Cost Estimate</h3>
-                    <p className="text-sm text-gray-500">Based on sheet price</p>
+                    <p className="text-sm text-gray-500">Based on configured prices</p>
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="bg-white rounded-lg p-3 border border-green-100">
-                    <div className="text-sm text-gray-500">Sheets</div>
-                    <div className="text-xl font-bold text-gray-900">{costEstimate.totalSheets}</div>
+                
+                {/* Sheet costs */}
+                {costEstimate.sheetPrice > 0 && (
+                  <div className="mb-4">
+                    <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Sheet Material</div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-white rounded-lg p-3 border border-green-100">
+                        <div className="text-xs text-gray-500">Sheets</div>
+                        <div className="text-lg font-bold text-gray-900">{costEstimate.totalSheets}</div>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 border border-green-100">
+                        <div className="text-xs text-gray-500">Price/Sheet</div>
+                        <div className="text-lg font-bold text-gray-900">{costEstimate.currency}{costEstimate.sheetPrice}</div>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 border border-green-100">
+                        <div className="text-xs text-gray-500">Subtotal</div>
+                        <div className="text-lg font-bold text-gray-700">{costEstimate.currency}{costEstimate.sheetCost.toFixed(2)}</div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="bg-white rounded-lg p-3 border border-green-100">
-                    <div className="text-sm text-gray-500">Price/Sheet</div>
-                    <div className="text-xl font-bold text-gray-900">{costEstimate.currency}{costEstimate.sheetPrice}</div>
+                )}
+                
+                {/* Edge banding costs */}
+                {costEstimate.edgeBandingMeters > 0 && costEstimate.edgeBandingPrice > 0 && (
+                  <div className="mb-4">
+                    <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Edge Banding</div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-white rounded-lg p-3 border border-green-100">
+                        <div className="text-xs text-gray-500">Length</div>
+                        <div className="text-lg font-bold text-gray-900">{costEstimate.edgeBandingMeters.toFixed(1)}m</div>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 border border-green-100">
+                        <div className="text-xs text-gray-500">Price/Meter</div>
+                        <div className="text-lg font-bold text-gray-900">{costEstimate.currency}{costEstimate.edgeBandingPrice}</div>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 border border-green-100">
+                        <div className="text-xs text-gray-500">Subtotal</div>
+                        <div className="text-lg font-bold text-gray-700">{costEstimate.currency}{costEstimate.edgeBandingCost.toFixed(2)}</div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="bg-white rounded-lg p-3 border border-green-100">
-                    <div className="text-sm text-gray-500">Total Cost</div>
-                    <div className="text-xl font-bold text-green-600">{costEstimate.currency}{costEstimate.totalCost.toFixed(2)}</div>
+                )}
+                
+                {/* Total */}
+                <div className="bg-green-600 rounded-lg p-4 text-white">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">Total Estimated Cost</span>
+                    <span className="text-2xl font-bold">{costEstimate.currency}{costEstimate.totalCost.toFixed(2)}</span>
                   </div>
                 </div>
+                
                 <p className="text-xs text-gray-500 mt-3">
-                  * Material waste: {costEstimate.wastePercent}% • Set sheet price in Settings to see cost estimates
+                  * Material waste: {costEstimate.wastePercent}% • Configure prices in Settings sidebar
                 </p>
               </div>
             </section>

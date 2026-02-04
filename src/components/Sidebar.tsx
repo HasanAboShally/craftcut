@@ -1,12 +1,20 @@
 import { useState } from "react";
 import { useDesignStore } from "../stores/designStore";
-import type { PanelOrientation, ZAlignment } from "../types";
+import type { EdgeBanding, PanelOrientation, ZAlignment, MATERIAL_PRESETS, MaterialType } from "../types";
 
 const THICKNESS_OPTIONS = [12, 15, 18, 19, 25];
 const SHEET_PRESETS = [
   { label: "2440 × 1220 mm (8' × 4')", width: 2440, height: 1220 },
   { label: "2440 × 610 mm (8' × 2')", width: 2440, height: 610 },
   { label: "1220 × 610 mm (4' × 2')", width: 1220, height: 610 },
+];
+
+const MATERIALS: { id: MaterialType; name: string; color: string }[] = [
+  { id: "plywood", name: "Plywood", color: "#E8D4B8" },
+  { id: "mdf", name: "MDF", color: "#D4C4A8" },
+  { id: "particleboard", name: "Particleboard", color: "#C8B89C" },
+  { id: "melamine", name: "Melamine (White)", color: "#FFFFFF" },
+  { id: "solid_wood", name: "Solid Wood", color: "#C19A6B" },
 ];
 
 // Validation constraints
@@ -366,6 +374,44 @@ export default function Sidebar() {
               </div>
             </div>
 
+            {/* Edge Banding */}
+            <div>
+              <label className="block text-xs text-gray-500 mb-2">
+                Edge Banding
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { key: "top", label: "Top" },
+                  { key: "bottom", label: "Bottom" },
+                  { key: "left", label: "Left" },
+                  { key: "right", label: "Right" },
+                ].map(({ key, label }) => (
+                  <label
+                    key={key}
+                    className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedPanel.edgeBanding?.[key as keyof EdgeBanding] || false}
+                      onChange={(e) =>
+                        updatePanel(selectedPanel.id, {
+                          edgeBanding: {
+                            ...selectedPanel.edgeBanding,
+                            [key]: e.target.checked,
+                          } as EdgeBanding,
+                        })
+                      }
+                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Select edges that need banding
+              </p>
+            </div>
+
             <button
               onClick={() => deletePanel(selectedPanel.id)}
               className="w-full px-3 py-2 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors"
@@ -487,7 +533,30 @@ export default function Sidebar() {
 
           <div>
             <label className="block text-xs text-gray-500 mb-1">
-              Wood Color
+              Material Type
+            </label>
+            <select
+              value={settings.materialType || "plywood"}
+              onChange={(e) => {
+                const mat = MATERIALS.find(m => m.id === e.target.value);
+                updateSettings({ 
+                  materialType: e.target.value as MaterialType,
+                  woodColor: mat?.color || settings.woodColor,
+                });
+              }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {MATERIALS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">
+              Color
             </label>
             <div className="flex gap-2 items-center">
               <input
@@ -496,52 +565,63 @@ export default function Sidebar() {
                 onChange={(e) => updateSettings({ woodColor: e.target.value })}
                 className="w-10 h-10 rounded border border-gray-300 cursor-pointer"
               />
-              <select
-                value={settings.woodColor || "#E8D4B8"}
-                onChange={(e) => updateSettings({ woodColor: e.target.value })}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="#E8D4B8">Light Plywood</option>
-                <option value="#D4A574">Pine</option>
-                <option value="#C19A6B">Oak</option>
-                <option value="#8B7355">Walnut</option>
-                <option value="#F5F5DC">Birch</option>
-                <option value="#DEB887">Beech</option>
-                <option value="#A0522D">Mahogany</option>
-                <option value="#FFFFFF">White Melamine</option>
-                <option value="#2C2C2C">Black Melamine</option>
-              </select>
+              <span className="text-sm text-gray-600 font-mono">{settings.woodColor || "#E8D4B8"}</span>
             </div>
           </div>
 
           {/* Cost Settings */}
           <div className="pt-3 border-t border-gray-200 mt-3">
-            <label className="block text-xs text-gray-500 mb-1">
-              Sheet Price (for cost estimates)
+            <label className="block text-xs font-medium text-gray-600 mb-2">
+              Cost Estimation
             </label>
-            <div className="flex gap-2">
-              <select
-                value={settings.currency || "$"}
-                onChange={(e) => updateSettings({ currency: e.target.value })}
-                className="w-16 px-2 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="$">$</option>
-                <option value="€">€</option>
-                <option value="£">£</option>
-                <option value="¥">¥</option>
-                <option value="₹">₹</option>
-              </select>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="0.00"
-                value={settings.sheetPrice || ""}
-                onChange={(e) => updateSettings({ sheetPrice: parseFloat(e.target.value) || 0 })}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+            
+            <div className="space-y-2">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Sheet Price</label>
+                <div className="flex gap-2">
+                  <select
+                    value={settings.currency || "$"}
+                    onChange={(e) => updateSettings({ currency: e.target.value })}
+                    className="w-16 px-2 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="$">$</option>
+                    <option value="€">€</option>
+                    <option value="£">£</option>
+                    <option value="¥">¥</option>
+                    <option value="₹">₹</option>
+                  </select>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={settings.sheetPrice || ""}
+                    onChange={(e) => updateSettings({ sheetPrice: parseFloat(e.target.value) || 0 })}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Edge Banding (per meter)</label>
+                <div className="flex gap-2">
+                  <span className="w-16 px-2 py-2 text-sm text-gray-500 text-center">
+                    {settings.currency || "$"}
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={settings.edgeBandingPrice || ""}
+                    onChange={(e) => updateSettings({ edgeBandingPrice: parseFloat(e.target.value) || 0 })}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
             </div>
-            <p className="text-xs text-gray-400 mt-1">
+            
+            <p className="text-xs text-gray-400 mt-2">
               Set price per sheet to see cost estimates
             </p>
           </div>

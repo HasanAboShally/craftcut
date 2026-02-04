@@ -8,6 +8,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   PenTool,
+  Plus,
   Redo2,
   Trash2,
   Undo2,
@@ -21,7 +22,7 @@ import { useDesignStore } from "../stores/designStore";
 import { useProjectsStore } from "../stores/projectsStore";
 import Canvas from "./Canvas";
 import Sidebar from "./Sidebar";
-import { ErrorBoundary, KeyboardHelp, ToastProvider, useConfirm, useKeyboardHelp, useToast } from "./ui";
+import { ErrorBoundary, KeyboardHelp, ToastProvider, Tooltip, useConfirm, useKeyboardHelp, useToast } from "./ui";
 
 // Lazy load heavy components
 const Preview3D = lazy(() => import("./Preview3D"));
@@ -291,56 +292,64 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
 
           {/* Undo/Redo */}
           <div className="flex items-center gap-1">
-            <button
-              onClick={undo}
-              disabled={!canUndo}
-              className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
-              aria-label="Undo (Ctrl+Z)"
-              title="Undo (Ctrl+Z)"
-            >
-              <Undo2 size={16} aria-hidden="true" />
-            </button>
-            <button
-              onClick={redo}
-              disabled={!canRedo}
-              className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
-              aria-label="Redo (Ctrl+Shift+Z)"
-              title="Redo (Ctrl+Shift+Z)"
-            >
-              <Redo2 size={16} aria-hidden="true" />
-            </button>
+            <Tooltip content="Undo (⌘Z)">
+              <button
+                onClick={undo}
+                disabled={!canUndo}
+                className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                aria-label="Undo"
+              >
+                <Undo2 size={16} aria-hidden="true" />
+              </button>
+            </Tooltip>
+            <Tooltip content="Redo (⌘⇧Z)">
+              <button
+                onClick={redo}
+                disabled={!canRedo}
+                className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                aria-label="Redo"
+              >
+                <Redo2 size={16} aria-hidden="true" />
+              </button>
+            </Tooltip>
           </div>
 
-          <button
-            onClick={handleClearAll}
-            className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded-lg transition-colors"
-            aria-label="Clear all panels"
-          >
-            <Trash2 size={16} aria-hidden="true" />
-          </button>
+          <Tooltip content="Clear all panels">
+            <button
+              onClick={handleClearAll}
+              className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded-lg transition-colors"
+              aria-label="Clear all panels"
+            >
+              <Trash2 size={16} aria-hidden="true" />
+            </button>
+          </Tooltip>
 
           <div className="h-6 w-px bg-slate-700 mx-1" aria-hidden="true" />
 
-          <button
-            onClick={keyboardHelp.toggle}
-            className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
-            aria-label="Keyboard shortcuts (press ?)"
-          >
-            <HelpCircle size={16} aria-hidden="true" />
-          </button>
+          <Tooltip content="Keyboard shortcuts (?)">
+            <button
+              onClick={keyboardHelp.toggle}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+              aria-label="Keyboard shortcuts"
+            >
+              <HelpCircle size={16} aria-hidden="true" />
+            </button>
+          </Tooltip>
 
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className={`p-2 rounded-lg transition-colors ${sidebarOpen ? "bg-slate-700 text-white" : "text-slate-400 hover:text-white hover:bg-slate-700"}`}
-            aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            aria-expanded={sidebarOpen}
-          >
-            {sidebarOpen ? (
-              <PanelRightClose size={16} aria-hidden="true" />
-            ) : (
-              <PanelRightOpen size={16} aria-hidden="true" />
-            )}
-          </button>
+          <Tooltip content={sidebarOpen ? "Hide sidebar" : "Show sidebar"}>
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className={`p-2 rounded-lg transition-colors ${sidebarOpen ? "bg-slate-700 text-white" : "text-slate-400 hover:text-white hover:bg-slate-700"}`}
+              aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+              aria-expanded={sidebarOpen}
+            >
+              {sidebarOpen ? (
+                <PanelRightClose size={16} aria-hidden="true" />
+              ) : (
+                <PanelRightOpen size={16} aria-hidden="true" />
+              )}
+            </button>
+          </Tooltip>
         </div>
       </header>
 
