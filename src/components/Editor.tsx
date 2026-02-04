@@ -66,6 +66,9 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
 
   // Enable keyboard shortcuts
   useKeyboardShortcuts(activeTab === "design");
+  
+  // Initialize theme (applies .dark class to document)
+  useTheme();
 
   // Get current project name
   const currentProject = projectId ? getProject(projectId) : null;
@@ -272,26 +275,26 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
             </button>
             {showExportMenu && (
               <div 
-                className="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[140px] z-50 animate-scale-in"
+                className="absolute right-0 top-full mt-1 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-gray-200 dark:border-slate-700 py-1 min-w-[140px] z-50 animate-scale-in"
                 role="menu"
               >
                 <button
                   onClick={handleExportJSON}
-                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700"
                   role="menuitem"
                 >
                   Export JSON
                 </button>
                 <button
                   onClick={handleExportCSV}
-                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700"
                   role="menuitem"
                 >
                   Export CSV
                 </button>
                 <button
                   onClick={handlePrint}
-                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700"
                   role="menuitem"
                 >
                   Print
@@ -396,15 +399,15 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
         {/* Collapsible Sidebar - Hidden in production view */}
         {activeTab !== "production" && (
           <aside
-            className={`bg-white border-l border-gray-200 transition-all duration-300 ease-in-out flex-shrink-0 overflow-hidden ${
+            className={`bg-white dark:bg-slate-800 border-l border-gray-200 dark:border-slate-700 transition-all duration-300 ease-in-out flex-shrink-0 overflow-hidden ${
               sidebarOpen ? "w-80" : "w-0"
             }`}
             aria-label="Panel properties"
           >
             {sidebarOpen && activeTab === "design" && <Sidebar />}
             {sidebarOpen && activeTab === "3d" && (
-              <div className="p-4 text-sm text-gray-500">
-                <h3 className="font-medium text-gray-700 mb-2">3D Preview</h3>
+              <div className="p-4 text-sm text-gray-500 dark:text-gray-400">
+                <h3 className="font-medium text-gray-700 dark:text-gray-200 mb-2">3D Preview</h3>
                 <ul className="space-y-1">
                   <li>🖱️ Drag to rotate</li>
                   <li>🔍 Scroll to zoom</li>

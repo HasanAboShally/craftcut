@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Configure dark mode to use .dark class */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* ============================================
    Dark Mode Theme Variables
    ============================================ */
@@ -30,6 +33,83 @@
 .dark body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
+}
+
+/* Dark mode form inputs */
+.dark input[type="text"],
+.dark input[type="number"],
+.dark input[type="email"],
+.dark input[type="password"],
+.dark select,
+.dark textarea {
+  background-color: #1e293b;
+  border-color: #475569;
+  color: #f1f5f9;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b;
+}
+
+/* Dark mode backgrounds */
+.dark .bg-white {
+  background-color: #1e293b;
+}
+
+.dark .bg-slate-50,
+.dark .bg-gray-50 {
+  background-color: #0f172a;
+}
+
+.dark .bg-slate-100,
+.dark .bg-gray-100 {
+  background-color: #1e293b;
+}
+
+/* Dark mode borders */
+.dark .border-gray-200,
+.dark .border-slate-200,
+.dark .border-gray-300,
+.dark .border-slate-300 {
+  border-color: #334155;
+}
+
+/* Dark mode text */
+.dark .text-gray-500,
+.dark .text-slate-500 {
+  color: #94a3b8;
+}
+
+.dark .text-gray-600,
+.dark .text-slate-600 {
+  color: #94a3b8;
+}
+
+.dark .text-gray-700,
+.dark .text-slate-700 {
+  color: #cbd5e1;
+}
+
+.dark .text-gray-800,
+.dark .text-slate-800 {
+  color: #e2e8f0;
+}
+
+.dark .text-gray-900,
+.dark .text-slate-900 {
+  color: #f1f5f9;
+}
+
+/* Dark mode hover states */
+.dark .hover\:bg-gray-100:hover,
+.dark .hover\:bg-slate-100:hover {
+  background-color: #334155 !important;
+}
+
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-slate-50:hover {
+  background-color: #1e293b !important;
 }
 
 /* ============================================

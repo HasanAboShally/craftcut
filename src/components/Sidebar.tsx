@@ -121,10 +121,10 @@ export default function Sidebar() {
   const multipleSelected = selectedPanelIds.length > 1;
 
   return (
-    <div className="w-full h-full bg-white p-4 flex flex-col gap-5 overflow-y-auto">
+    <div className="w-full h-full bg-white dark:bg-slate-800 p-4 flex flex-col gap-5 overflow-y-auto">
       {/* Panel Properties */}
       <div>
-        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+        <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-3">
           {selectedPanel
             ? "Panel Properties"
             : multipleSelected
@@ -134,13 +134,13 @@ export default function Sidebar() {
 
         {multipleSelected ? (
           <div className="space-y-3">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               {selectedPanelIds.length} panels selected. Use arrow keys to move
               them together, or Cmd+D to duplicate.
             </p>
             <button
               onClick={() => deletePanels(selectedPanelIds)}
-              className="w-full px-3 py-2 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors"
+              className="w-full px-3 py-2 text-sm text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-md hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
             >
               Delete {selectedPanelIds.length} Panels
             </button>
@@ -148,19 +148,19 @@ export default function Sidebar() {
         ) : selectedPanel ? (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Label</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Label</label>
               <input
                 type="text"
                 value={selectedPanel.label}
                 onChange={(e) =>
                   updatePanel(selectedPanel.id, { label: e.target.value })
                 }
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Type</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Type</label>
               <select
                 value={selectedPanel.orientation || "horizontal"}
                 onChange={(e) =>
@@ -168,7 +168,7 @@ export default function Sidebar() {
                     orientation: e.target.value as PanelOrientation,
                   })
                 }
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 {ORIENTATION_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>

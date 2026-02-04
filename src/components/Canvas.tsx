@@ -3342,6 +3342,10 @@ export default function Canvas() {
     const startPoint = measurePoints[0];
     const endPoint = measurePoints[1] || measurePreview;
     
+    // Get panel IDs being measured
+    const startPanelId = measurePoints[0]?.panelId;
+    const endPanelId = measurePoints[1]?.panelId;
+    
     // Check if points are snapped to panels
     const isStartSnapped = startPoint ? snapMeasurePoint(startPoint.x, startPoint.y, false).snapped : false;
     const isEndSnapped = endPoint ? snapMeasurePoint(endPoint.x, endPoint.y, false).snapped : false;
@@ -3371,6 +3375,26 @@ export default function Canvas() {
     
     return (
       <g className="measure-tool">
+        {/* Highlight panels being measured */}
+        {startPanelId && panels.filter(p => p.id === startPanelId || p.id === endPanelId).map((panel) => {
+          const dims = getTrueDimensions(panel, settings.thickness);
+          const screenY = worldToScreenY(panel.y + dims.height);
+          return (
+            <rect
+              key={`highlight-${panel.id}`}
+              x={panel.x}
+              y={screenY}
+              width={dims.width}
+              height={dims.height}
+              fill="#10b981"
+              fillOpacity={0.15}
+              stroke="#10b981"
+              strokeWidth={2 / zoom}
+              rx={2 / zoom}
+            />
+          );
+        })}
+        
         {/* Snap indicators for all panel corners/edges when measuring */}
         {measurePoints.length < 2 && panels.map((panel) => {
           const dims = getTrueDimensions(panel, settings.thickness);
