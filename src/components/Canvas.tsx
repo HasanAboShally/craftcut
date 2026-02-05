@@ -21,6 +21,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { setCanvasSvgRef } from "../lib/thumbnail";
 import { useDesignStore } from "../stores/designStore";
 import type { Panel, StickyNote as StickyNoteType } from "../types";
 import { AlignmentToolbar, ContextMenu, createPanelContextActions } from "./canvasTools";
@@ -873,6 +874,12 @@ export default function Canvas() {
   // ===========================================================================
   // EFFECTS
   // ===========================================================================
+
+  // Register SVG ref for thumbnail capture
+  useEffect(() => {
+    setCanvasSvgRef(svgRef.current);
+    return () => setCanvasSvgRef(null);
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;

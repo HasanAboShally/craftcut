@@ -306,17 +306,28 @@
 
 /* Print booklet specific styles */
 @media print {
-  body.print-booklet-open > *:not(.fixed) {
+  /* Hide everything except print booklet */
+  body.print-booklet-open > * {
     display: none !important;
   }
   
-  body.print-booklet-open .fixed {
+  /* But show the print booklet container */
+  body.print-booklet-open .print-booklet-container {
+    display: block !important;
     position: static !important;
     overflow: visible !important;
+    background: white !important;
+    width: 100% !important;
+    height: auto !important;
   }
   
-  body.print-booklet-open .fixed > div {
+  body.print-booklet-open .print-booklet-container > div:first-child {
+    display: none !important; /* Hide the header */
+  }
+  
+  body.print-booklet-open .print-booklet-container > div:last-child {
     max-width: none !important;
     padding: 0 !important;
+    margin: 0 !important;
   }
 }

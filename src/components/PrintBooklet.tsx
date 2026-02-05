@@ -81,13 +81,90 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
     };
   }, [panels, settings, optimizationResult]);
 
-  // Handle print
+  // Handle print - open in new window for reliability
   const handlePrint = () => {
     setIsPrinting(true);
-    setTimeout(() => {
-      window.print();
+    
+    // Get the content to print
+    const content = contentRef.current;
+    if (!content) {
       setIsPrinting(false);
-    }, 100);
+      return;
+    }
+    
+    // Create a new window for printing
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) {
+      alert('Please allow popups for printing');
+      setIsPrinting(false);
+      return;
+    }
+    
+    // Write the print content
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>${settings.projectName || 'Project'} - Print</title>
+        <style>
+          @page { size: A4; margin: 12mm; }
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { font-family: system-ui, -apple-system, sans-serif; color: #1e293b; line-height: 1.5; }
+          .cover-page { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
+          .page-break { page-break-after: always; }
+          .section { margin-bottom: 2rem; page-break-inside: avoid; }
+          table { width: 100%; border-collapse: collapse; }
+          th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+          th { background: #f1f5f9; font-weight: 600; }
+          h1 { font-size: 2.5rem; font-weight: bold; margin-bottom: 0.5rem; }
+          h2 { font-size: 1.5rem; font-weight: 600; margin-bottom: 1rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem; }
+          h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; }
+          .text-center { text-align: center; }
+          .text-gray { color: #64748b; }
+          .text-sm { font-size: 0.875rem; }
+          .mb-2 { margin-bottom: 0.5rem; }
+          .mb-4 { margin-bottom: 1rem; }
+          .mb-6 { margin-bottom: 1.5rem; }
+          .mb-8 { margin-bottom: 2rem; }
+          .mt-8 { margin-top: 2rem; }
+          .p-4 { padding: 1rem; }
+          .p-8 { padding: 2rem; }
+          .bg-gray { background: #f8fafc; }
+          .rounded { border-radius: 0.5rem; }
+          .grid { display: grid; gap: 1rem; }
+          .grid-3 { grid-template-columns: repeat(3, 1fr); }
+          .stat-box { background: #f1f5f9; padding: 1rem; border-radius: 0.5rem; text-align: center; }
+          .stat-value { font-size: 1.5rem; font-weight: bold; color: #1e40af; }
+          .stat-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; }
+          .cutting-diagram { margin: 1rem 0; page-break-inside: avoid; }
+          .cutting-diagram svg { max-width: 100%; height: auto; }
+        </style>
+      </head>
+      <body>
+        ${content.innerHTML}
+      </body>
+      </html>
+    `);
+    
+    printWindow.document.close();
+    
+    // Wait for content to load, then print
+    printWindow.onload = () => {
+      setTimeout(() => {
+        printWindow.print();
+        printWindow.close();
+        setIsPrinting(false);
+      }, 250);
+    };
+    
+    // Fallback if onload doesn't fire
+    setTimeout(() => {
+      if (!printWindow.closed) {
+        printWindow.print();
+        printWindow.close();
+      }
+      setIsPrinting(false);
+    }, 1000);
   };
 
   // Add/remove print class on body
@@ -107,7 +184,7 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
   const totalPanels = panels.reduce((sum, p) => sum + (p.quantity || 1), 0);
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-100 dark:bg-slate-900 overflow-auto print:bg-white">
+    <div className="print-booklet-container fixed inset-0 z-50 bg-gray-100 dark:bg-slate-900 overflow-auto print:bg-white print:static print:overflow-visible">
       {/* Header - hidden when printing */}
       <div className="sticky top-0 z-10 bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 px-4 py-3 flex items-center justify-between print:hidden">
         <div className="flex items-center gap-3">

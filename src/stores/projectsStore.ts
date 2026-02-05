@@ -14,6 +14,7 @@ export interface ProjectMeta {
   createdAt: number;
   updatedAt: number;
   panelCount: number;
+  thumbnail?: string; // Base64 image data
 }
 
 interface ProjectsState {

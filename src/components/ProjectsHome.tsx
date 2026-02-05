@@ -72,18 +72,24 @@ function ProjectCard({
 
   return (
     <div
-      className="group relative bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-lg transition-all cursor-pointer"
+      className="group relative bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-500 hover:shadow-lg transition-all cursor-pointer"
       onClick={onOpen}
     >
       {/* Preview Area */}
-      <div className="h-40 bg-gradient-to-br from-slate-50 to-slate-100 rounded-t-xl flex items-center justify-center">
-        {project.panelCount > 0 ? (
+      <div className="h-40 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-700 dark:to-slate-800 rounded-t-xl flex items-center justify-center overflow-hidden">
+        {project.thumbnail ? (
+          <img 
+            src={project.thumbnail} 
+            alt={project.name}
+            className="w-full h-full object-cover"
+          />
+        ) : project.panelCount > 0 ? (
           <div className="text-center">
-            <div className="text-3xl font-bold text-slate-300">{project.panelCount}</div>
-            <div className="text-xs text-slate-400">panels</div>
+            <div className="text-3xl font-bold text-slate-300 dark:text-slate-500">{project.panelCount}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500">panels</div>
           </div>
         ) : (
-          <div className="text-slate-300">
+          <div className="text-slate-300 dark:text-slate-600">
             <FolderOpen size={48} strokeWidth={1} />
           </div>
         )}
@@ -91,10 +97,10 @@ function ProjectCard({
 
       {/* Info */}
       <div className="p-4">
-        <h3 className="font-medium text-gray-900 truncate" title={project.name}>
+        <h3 className="font-medium text-gray-900 dark:text-white truncate" title={project.name}>
           {project.name}
         </h3>
-        <div className="flex items-center gap-1 text-xs text-gray-400 mt-1">
+        <div className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500 mt-1">
           <Clock size={12} />
           <span>{formatDate(project.updatedAt)}</span>
         </div>

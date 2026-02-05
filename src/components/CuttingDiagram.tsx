@@ -264,8 +264,59 @@ const CuttingDiagram = memo(function CuttingDiagram() {
                       </g>
                     );
                   })}
+                  
+                  {/* Usable waste areas - shown with dashed outline */}
+                  {result.usableWaste?.filter(w => w.sheetIndex === sheetIndex).map((waste, wasteIndex) => {
+                    const x = waste.x * scale + 1;
+                    const y = waste.y * scale + 1;
+                    const w = waste.width * scale;
+                    const h = waste.height * scale;
+                    const areaM2 = (waste.area / 1000000).toFixed(2);
+                    
+                    return (
+                      <g key={`waste-${wasteIndex}`} opacity={0.6}>
+                        <rect
+                          x={x}
+                          y={y}
+                          width={w}
+                          height={h}
+                          fill="#dcfce7"
+                          stroke="#22c55e"
+                          strokeWidth={1}
+                          strokeDasharray="4 2"
+                          rx={2}
+                        />
+                        {w > 50 && h > 30 && (
+                          <text
+                            x={x + w / 2}
+                            y={y + h / 2 + 3}
+                            textAnchor="middle"
+                            dominantBaseline="middle"
+                            fontSize={9}
+                            fill="#16a34a"
+                            fontWeight="500"
+                            fontFamily="system-ui, sans-serif"
+                          >
+                            {waste.width}×{waste.height}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
                 </svg>
               </div>
+              
+              {/* Usable waste summary for this sheet */}
+              {result.usableWaste && result.usableWaste.filter(w => w.sheetIndex === sheetIndex).length > 0 && (
+                <div className="px-4 pb-3">
+                  <div className="text-xs text-green-600 flex items-center gap-1">
+                    <span className="inline-block w-3 h-3 border border-green-400 border-dashed rounded bg-green-50"></span>
+                    <span>
+                      Usable offcuts: {result.usableWaste.filter(w => w.sheetIndex === sheetIndex).map(w => `${w.width}×${w.height}mm`).join(", ")}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

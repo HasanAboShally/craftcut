@@ -14,11 +14,12 @@ import {
   Undo2,
   Upload,
 } from "lucide-react";
-import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useTheme } from "../hooks/useTheme";
 import { exportToCSV, exportToJSON, importFromJSON } from "../lib/export";
 import { calculateCutList } from "../lib/optimizer";
+import { captureCurrentCanvasThumbnail } from "../lib/thumbnail";
 import { useDesignStore } from "../stores/designStore";
 import { useProjectsStore } from "../stores/projectsStore";
 import Canvas from "./Canvas";
@@ -74,18 +75,43 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
   const currentProject = projectId ? getProject(projectId) : null;
   const projectName = settings.projectName || currentProject?.name || "Untitled";
 
-  // Save project on unmount and periodically
+  // Save thumbnail periodically
+  const saveThumbnail = useCallback(async () => {
+    if (!projectId || activeTab !== "design") return;
+    
+    try {
+      const thumbnail = await captureCurrentCanvasThumbnail();
+      if (thumbnail) {
+        updateProject(projectId, { thumbnail });
+      }
+    } catch (error) {
+      console.warn("Failed to capture thumbnail:", error);
+    }
+  }, [projectId, activeTab, updateProject]);
+
+  // Save project on unmount and capture thumbnail periodically
   useEffect(() => {
     if (!projectId) return;
     
+    // Capture thumbnail after a short delay (let canvas render)
+    const thumbnailTimer = setTimeout(() => {
+      saveThumbnail();
+    }, 1000);
+    
+    // Also capture when switching tabs or every 30 seconds
+    const interval = setInterval(saveThumbnail, 30000);
+    
     // Save when component unmounts
     return () => {
+      clearTimeout(thumbnailTimer);
+      clearInterval(interval);
       saveProject();
+      saveThumbnail();
       if (currentProject) {
         updateProject(projectId, { panelCount: panels.length });
       }
     };
-  }, [projectId]);
+  }, [projectId, saveThumbnail]);
 
   const handleExportJSON = () => {
     try {

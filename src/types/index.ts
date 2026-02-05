@@ -112,6 +112,18 @@ export interface OptimizationResult {
   totalSheets: number;
   totalWaste: number;
   unplacedPieces: Panel[];
+  usableWaste?: UsableWastePiece[]; // Leftover pieces large enough to reuse
+  efficiency?: number; // Material efficiency percentage (0-100)
+}
+
+// Usable waste piece that could be reused for other projects
+export interface UsableWastePiece {
+  sheetIndex: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  area: number; // in mm²
 }
 
 // ============================================

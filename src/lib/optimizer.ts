@@ -18,8 +18,21 @@ interface FreeRect {
   height: number;
 }
 
+// Usable leftover piece (waste that can be reused)
+export interface UsableWaste {
+  sheetId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  area: number;
+}
+
 // Blade kerf - space lost to each cut (typical table saw blade)
 const KERF = 3; // mm
+
+// Minimum dimension for a usable waste piece (mm)
+const MIN_USABLE_WASTE = 100;
 
 /**
  * Get the actual cut dimensions for a panel based on its orientation.
@@ -123,22 +136,29 @@ export function optimizeCuts(
 
   // Try multiple sorting strategies and pick the best result
   const strategies: SortStrategy[] = ['area', 'width', 'height', 'perimeter', 'maxSide'];
+  const placementHeuristics: PlacementHeuristic[] = ['bestShortSide', 'bestLongSide', 'bestArea', 'bottomLeft'];
+  
   let bestResult: OptimizationResult | null = null;
   
+  // Try all combinations of sorting strategy and placement heuristic
   for (const strategy of strategies) {
-    const sortedPieces = sortPieces(pieces, strategy);
-    const result = packPieces(sortedPieces, panels, sheetWidth, sheetHeight);
-    
-    // Compare results: fewer sheets wins, then lower waste
-    if (!bestResult || 
-        result.totalSheets < bestResult.totalSheets ||
-        (result.totalSheets === bestResult.totalSheets && result.totalWaste < bestResult.totalWaste)) {
-      bestResult = result;
+    for (const heuristic of placementHeuristics) {
+      const sortedPieces = sortPieces(pieces, strategy);
+      const result = packPieces(sortedPieces, panels, sheetWidth, sheetHeight, heuristic);
+      
+      // Compare results: fewer sheets wins, then higher efficiency
+      if (!bestResult || 
+          result.totalSheets < bestResult.totalSheets ||
+          (result.totalSheets === bestResult.totalSheets && (result.efficiency || 0) > (bestResult.efficiency || 0))) {
+        bestResult = result;
+      }
     }
   }
 
   return bestResult!;
 }
+
+type PlacementHeuristic = 'bestShortSide' | 'bestLongSide' | 'bestArea' | 'bottomLeft';
 
 /**
  * Pack pieces into sheets using Best-Fit Decreasing with Guillotine cutting
@@ -148,6 +168,7 @@ function packPieces(
   panels: Panel[],
   sheetWidth: number,
   sheetHeight: number,
+  heuristic: PlacementHeuristic = 'bestShortSide',
 ): OptimizationResult {
   const sheets: Sheet[] = [];
   const unplacedPieces: Panel[] = [];
@@ -180,7 +201,7 @@ function packPieces(
     let bestPlacement: { sheetIndex: number; x: number; y: number; rotated: boolean; score: number } | null = null;
 
     for (let i = 0; i < sheets.length; i++) {
-      const position = findBestPosition(sheets[i], piece, sheetWidth, sheetHeight, canRotate);
+      const position = findBestPosition(sheets[i], piece, sheetWidth, sheetHeight, canRotate, heuristic);
       if (position) {
         // Score: lower is better (tighter fit, less wasted space)
         if (!bestPlacement || position.score < bestPlacement.score) {
@@ -242,16 +263,47 @@ function packPieces(
       ? Math.round((1 - totalUsedArea / totalSheetArea) * 100)
       : 0;
 
+  // Calculate usable waste pieces (leftover areas large enough to reuse)
+  const usableWaste: { sheetIndex: number; x: number; y: number; width: number; height: number; area: number }[] = [];
+  
+  sheets.forEach((sheet, sheetIndex) => {
+    const freeRects = getFreeRectangles(sheet, sheetWidth, sheetHeight);
+    
+    for (const rect of freeRects) {
+      // Only include pieces that are large enough to be useful
+      if (rect.width >= MIN_USABLE_WASTE && rect.height >= MIN_USABLE_WASTE) {
+        usableWaste.push({
+          sheetIndex,
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          area: rect.width * rect.height,
+        });
+      }
+    }
+  });
+
+  // Sort usable waste by area (largest first)
+  usableWaste.sort((a, b) => b.area - a.area);
+
+  // Calculate efficiency
+  const efficiency = totalSheetArea > 0 
+    ? Math.round((totalUsedArea / totalSheetArea) * 100) 
+    : 0;
+
   return {
     sheets,
     totalSheets: sheets.length,
     totalWaste,
     unplacedPieces,
+    usableWaste,
+    efficiency,
   };
 }
 
 /**
- * Find the best position in a sheet using Best-Fit strategy
+ * Find the best position in a sheet using various heuristics
  * Returns position with a score (lower = better fit)
  */
 function findBestPosition(
@@ -260,20 +312,41 @@ function findBestPosition(
   sheetWidth: number,
   sheetHeight: number,
   canRotate: boolean = true,
+  heuristic: PlacementHeuristic = 'bestShortSide',
 ): { x: number; y: number; rotated: boolean; score: number } | null {
   // Get free rectangles using maximal rectangles algorithm
   const freeRects = getFreeRectangles(sheet, sheetWidth, sheetHeight);
   
   let bestFit: { x: number; y: number; rotated: boolean; score: number } | null = null;
 
+  // Calculate score based on heuristic
+  const calculateScore = (rect: FreeRect, pieceW: number, pieceH: number): number => {
+    const leftoverH = rect.width - pieceW;
+    const leftoverV = rect.height - pieceH;
+    
+    switch (heuristic) {
+      case 'bestShortSide':
+        // Minimize the shorter leftover side
+        return Math.min(leftoverH, leftoverV) * 1000 + Math.max(leftoverH, leftoverV);
+      case 'bestLongSide':
+        // Minimize the longer leftover side
+        return Math.max(leftoverH, leftoverV) * 1000 + Math.min(leftoverH, leftoverV);
+      case 'bestArea':
+        // Minimize leftover area
+        return (rect.width * rect.height) - (pieceW * pieceH);
+      case 'bottomLeft':
+        // Prefer bottom-left positions (good for guillotine cuts)
+        return rect.y * 10000 + rect.x;
+      default:
+        return Math.min(leftoverH, leftoverV) * 1000 + Math.max(leftoverH, leftoverV);
+    }
+  };
+
   // Try each free rectangle
   for (const rect of freeRects) {
     // Try normal orientation
     if (piece.width + KERF <= rect.width && piece.height + KERF <= rect.height) {
-      // Score based on how well piece fits (Best Short Side Fit)
-      const leftoverH = rect.width - piece.width;
-      const leftoverV = rect.height - piece.height;
-      const score = Math.min(leftoverH, leftoverV) * 1000 + Math.max(leftoverH, leftoverV) + rect.y * 0.1;
+      const score = calculateScore(rect, piece.width, piece.height);
       
       if (!bestFit || score < bestFit.score) {
         bestFit = { x: rect.x, y: rect.y, rotated: false, score };
@@ -283,9 +356,7 @@ function findBestPosition(
     // Try rotated orientation (only if dimensions differ and rotation is allowed)
     if (canRotate && piece.width !== piece.height && 
         piece.height + KERF <= rect.width && piece.width + KERF <= rect.height) {
-      const leftoverH = rect.width - piece.height;
-      const leftoverV = rect.height - piece.width;
-      const score = Math.min(leftoverH, leftoverV) * 1000 + Math.max(leftoverH, leftoverV) + rect.y * 0.1;
+      const score = calculateScore(rect, piece.height, piece.width);
       
       if (!bestFit || score < bestFit.score) {
         bestFit = { x: rect.x, y: rect.y, rotated: true, score };
