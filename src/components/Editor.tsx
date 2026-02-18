@@ -10,6 +10,7 @@ import {
   PenTool,
   Plus,
   Redo2,
+  Settings,
   Trash2,
   Undo2,
   Upload,
@@ -22,6 +23,7 @@ import { calculateCutList } from "../lib/optimizer";
 import { captureCurrentCanvasThumbnail } from "../lib/thumbnail";
 import { useDesignStore } from "../stores/designStore";
 import { useProjectsStore } from "../stores/projectsStore";
+import { CraftCutLogo } from "./CraftCutLogo";
 import Canvas from "./Canvas";
 import Sidebar from "./Sidebar";
 import { ErrorBoundary, KeyboardHelp, ToastProvider, Tooltip, useConfirm, useKeyboardHelp, useToast } from "./ui";
@@ -31,6 +33,7 @@ import { ThemeToggle } from "./ui/ThemeToggle";
 const Preview3D = lazy(() => import("./Preview3D"));
 const ProductionView = lazy(() => import("./ProductionView"));
 const PrintBooklet = lazy(() => import("./PrintBooklet"));
+const SettingsView = lazy(() => import("./SettingsView"));
 
 // Loading skeleton for lazy components
 function LoadingSkeleton({ label }: { label: string }) {
@@ -44,7 +47,7 @@ function LoadingSkeleton({ label }: { label: string }) {
   );
 }
 
-type ViewTab = "design" | "3d" | "production";
+type ViewTab = "design" | "3d" | "production" | "settings";
 
 interface EditorContentProps {
   onGoHome?: () => void;
@@ -195,6 +198,7 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
     { id: "design", label: "Design", icon: <PenTool size={16} /> },
     { id: "3d", label: "3D", icon: <Box size={16} /> },
     { id: "production", label: "Production", icon: <Package size={16} /> },
+    { id: "settings", label: "Settings", icon: <Settings size={16} /> },
   ];
 
   return (
@@ -226,7 +230,7 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
           )}
 
           <div className="flex items-center gap-2">
-            <span className="text-lg" aria-hidden="true">🪵</span>
+            <CraftCutLogo size={20} variant="white" label="" />
             <div className="flex flex-col">
               <span className="font-semibold text-sm leading-tight">{projectName}</span>
               {onGoHome && (
@@ -420,10 +424,15 @@ function EditorContent({ onGoHome, projectId }: EditorContentProps) {
               <ProductionView />
             </Suspense>
           )}
+          {activeTab === "settings" && (
+            <Suspense fallback={<LoadingSkeleton label="Settings" />}>
+              <SettingsView />
+            </Suspense>
+          )}
         </div>
 
-        {/* Collapsible Sidebar - Hidden in production view */}
-        {activeTab !== "production" && (
+        {/* Collapsible Sidebar - Hidden in production/settings views */}
+        {activeTab !== "production" && activeTab !== "settings" && (
           <aside
             className={`bg-white dark:bg-slate-800 border-l border-gray-200 dark:border-slate-700 transition-all duration-300 ease-in-out flex-shrink-0 overflow-hidden ${
               sidebarOpen ? "w-80" : "w-0"

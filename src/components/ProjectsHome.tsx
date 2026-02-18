@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import { useProjectsStore, type ProjectMeta } from "../stores/projectsStore";
+import { CraftCutLogo } from "./CraftCutLogo";
 import { ConfirmModal } from "./ui/ConfirmModal";
 
 interface ProjectsHomeProps {
@@ -217,13 +218,13 @@ export default function ProjectsHome({ onOpenProject }: ProjectsHomeProps) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <span className="text-2xl">🪵</span>
+              <CraftCutLogo size={32} variant="color" label="" />
               <div>
                 <h1 className="text-xl font-bold text-gray-900">CraftCut</h1>
                 <p className="text-sm text-gray-500">DIY Furniture Planner</p>
@@ -302,6 +303,19 @@ export default function ProjectsHome({ onOpenProject }: ProjectsHomeProps) {
           </div>
         )}
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-gray-200 mt-auto">
+        <div className="max-w-6xl mx-auto px-6 py-6">
+          <div className="flex items-center justify-between text-sm text-gray-400">
+            <div className="flex items-center gap-2">
+              <CraftCutLogo size={16} variant="mono" className="text-gray-400" label="" />
+              <span>CraftCut</span>
+            </div>
+            <span>© {new Date().getFullYear()} — Free & open-source DIY planner</span>
+          </div>
+        </div>
+      </footer>
 
       {/* Rename Modal */}
       {renamingProject && (

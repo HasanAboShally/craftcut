@@ -1,5 +1,5 @@
 import { Printer, X } from "lucide-react";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { calculateGroupedCutList, optimizeCuts } from "../lib/optimizer";
 import { useDesignStore } from "../stores/designStore";
 import CuttingDiagram from "./CuttingDiagram";
@@ -8,9 +8,58 @@ interface PrintBookletProps {
   onClose: () => void;
 }
 
+/**
+ * Self-contained print CSS — used inside an iframe so it's completely
+ * isolated from the app's dark-mode / Tailwind styles.
+ */
+const PRINT_CSS = `
+@page { size: A4; margin: 12mm; }
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; background: #fff; color: #1e293b;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  line-height: 1.5; -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.cover { min-height: 97vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; page-break-after: always; break-after: page; }
+.cover h1 { font-size: 2.5rem; font-weight: 700; margin: 0 0 .25rem; }
+.cover .subtitle { font-size: 1.1rem; color: #64748b; margin-bottom: 2rem; }
+.cover .stats { display: inline-flex; gap: 1.5rem; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; padding: .75rem 2rem; font-size: .875rem; color: #475569; }
+.cover .stats b { color: #1e293b; }
+.cover .date { font-size: .8rem; color: #94a3b8; margin-top: 2rem; }
+.cover .icon { width: 64px; height: 64px; background: #dbeafe; border-radius: 1rem; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem; }
+.cover .icon svg { width: 32px; height: 32px; color: #2563eb; }
+.page-break { page-break-after: always; break-after: page; height: 0; visibility: hidden; }
+.section { margin-bottom: 2rem; page-break-inside: avoid; break-inside: avoid; }
+.section-title { font-size: 1.25rem; font-weight: 700; margin: 0 0 1rem; display: flex; align-items: center; gap: .5rem; }
+.section-num { width: 28px; height: 28px; background: #dbeafe; color: #2563eb; border-radius: .4rem; display: inline-flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 700; }
+table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+th { background: #f1f5f9; font-weight: 600; color: #334155; }
+td { color: #1e293b; }
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+.mono { font-family: ui-monospace, monospace; }
+.badge { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; background: #1e293b; color: #fff; font-size: .7rem; font-weight: 700; border-radius: 4px; }
+.footer-row { display: flex; justify-content: space-between; font-size: .8rem; color: #475569; margin-top: 1rem; padding-top: .75rem; border-top: 1px solid #e2e8f0; }
+.diagram-container svg { max-width: 100%; height: auto; }
+.cost-row { display: flex; justify-content: space-between; padding: .6rem 0; border-bottom: 1px solid #f1f5f9; font-size: .9rem; }
+.cost-row .label { color: #475569; }
+.cost-row .value { font-weight: 600; color: #1e293b; }
+.cost-total { display: flex; justify-content: space-between; padding: .75rem 0; border-top: 2px solid #e2e8f0; margin-top: .25rem; }
+.cost-total .value { font-size: 1.25rem; font-weight: 700; color: #2563eb; }
+.note-box { background: #f8fafc; border-radius: .5rem; padding: .75rem 1rem; font-size: .85rem; color: #475569; margin-bottom: .75rem; }
+.note-box strong { color: #1e293b; }
+.note-box ul { margin: .4rem 0 0 1.2rem; padding: 0; }
+.note-box li { margin-bottom: .2rem; }
+.warning-box { background: #fffbeb; border-radius: .5rem; padding: .75rem 1rem; font-size: .85rem; color: #92400e; }
+.warning-box strong { color: #78350f; }
+.generated { font-size: .7rem; color: #94a3b8; margin-top: 1.5rem; padding-top: .75rem; border-top: 1px solid #e2e8f0; }
+`;
+
 export default function PrintBooklet({ onClose }: PrintBookletProps) {
   const { panels, settings } = useDesignStore();
   const contentRef = useRef<HTMLDivElement>(null);
+  const diagramRef = useRef<HTMLDivElement>(null);
   const [isPrinting, setIsPrinting] = useState(false);
 
   // Calculate cut list and optimization
@@ -18,7 +67,7 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
     return calculateGroupedCutList(
       panels,
       settings.thickness,
-      settings.furnitureDepth || 400
+      settings.furnitureDepth || 400,
     );
   }, [panels, settings.thickness, settings.furnitureDepth]);
 
@@ -28,7 +77,7 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
       settings.sheetWidth,
       settings.sheetHeight,
       settings.furnitureDepth || 400,
-      dimensionToLetter
+      dimensionToLetter,
     );
   }, [panels, settings, dimensionToLetter]);
 
@@ -40,7 +89,6 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
     const totalSheets = optimizationResult.totalSheets;
     const sheetCost = totalSheets * sheetPrice;
 
-    // Calculate edge banding length
     let edgeBandingLength = 0;
     panels.forEach((panel) => {
       if (!panel.edgeBanding) return;
@@ -81,112 +129,157 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
     };
   }, [panels, settings, optimizationResult]);
 
-  // Handle print - open in new window for reliability
-  const handlePrint = () => {
-    setIsPrinting(true);
-    
-    // Get the content to print
-    const content = contentRef.current;
-    if (!content) {
-      setIsPrinting(false);
-      return;
-    }
-    
-    // Create a new window for printing
-    const printWindow = window.open('', '_blank', 'width=800,height=600');
-    if (!printWindow) {
-      alert('Please allow popups for printing');
-      setIsPrinting(false);
-      return;
-    }
-    
-    // Write the print content
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>${settings.projectName || 'Project'} - Print</title>
-        <style>
-          @page { size: A4; margin: 12mm; }
-          * { box-sizing: border-box; margin: 0; padding: 0; }
-          body { font-family: system-ui, -apple-system, sans-serif; color: #1e293b; line-height: 1.5; }
-          .cover-page { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
-          .page-break { page-break-after: always; }
-          .section { margin-bottom: 2rem; page-break-inside: avoid; }
-          table { width: 100%; border-collapse: collapse; }
-          th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
-          th { background: #f1f5f9; font-weight: 600; }
-          h1 { font-size: 2.5rem; font-weight: bold; margin-bottom: 0.5rem; }
-          h2 { font-size: 1.5rem; font-weight: 600; margin-bottom: 1rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem; }
-          h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; }
-          .text-center { text-align: center; }
-          .text-gray { color: #64748b; }
-          .text-sm { font-size: 0.875rem; }
-          .mb-2 { margin-bottom: 0.5rem; }
-          .mb-4 { margin-bottom: 1rem; }
-          .mb-6 { margin-bottom: 1.5rem; }
-          .mb-8 { margin-bottom: 2rem; }
-          .mt-8 { margin-top: 2rem; }
-          .p-4 { padding: 1rem; }
-          .p-8 { padding: 2rem; }
-          .bg-gray { background: #f8fafc; }
-          .rounded { border-radius: 0.5rem; }
-          .grid { display: grid; gap: 1rem; }
-          .grid-3 { grid-template-columns: repeat(3, 1fr); }
-          .stat-box { background: #f1f5f9; padding: 1rem; border-radius: 0.5rem; text-align: center; }
-          .stat-value { font-size: 1.5rem; font-weight: bold; color: #1e40af; }
-          .stat-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; }
-          .cutting-diagram { margin: 1rem 0; page-break-inside: avoid; }
-          .cutting-diagram svg { max-width: 100%; height: auto; }
-        </style>
-      </head>
-      <body>
-        ${content.innerHTML}
-      </body>
-      </html>
-    `);
-    
-    printWindow.document.close();
-    
-    // Wait for content to load, then print
-    printWindow.onload = () => {
-      setTimeout(() => {
-        printWindow.print();
-        printWindow.close();
-        setIsPrinting(false);
-      }, 250);
-    };
-    
-    // Fallback if onload doesn't fire
-    setTimeout(() => {
-      if (!printWindow.closed) {
-        printWindow.print();
-        printWindow.close();
-      }
-      setIsPrinting(false);
-    }, 1000);
-  };
-
-  // Add/remove print class on body
-  useEffect(() => {
-    document.body.classList.add("print-booklet-open");
-    return () => {
-      document.body.classList.remove("print-booklet-open");
-    };
-  }, []);
-
   const today = new Date().toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",
   });
-
   const totalPanels = panels.reduce((sum, p) => sum + (p.quantity || 1), 0);
 
+  // ─── iframe-based printing ───────────────────────────────────────
+  const handlePrint = () => {
+    setIsPrinting(true);
+
+    // Grab the rendered SVGs from the CuttingDiagram component
+    const diagramHTML = diagramRef.current?.innerHTML ?? "";
+
+    // Build parts-list table rows
+    const partsRows = groupedPieces
+      .map((piece) => {
+        const panel = panels.find((p) => p.id === piece.sourceId);
+        const eb = panel?.edgeBanding;
+        const edges: string[] = [];
+        if (eb?.top) edges.push("T");
+        if (eb?.bottom) edges.push("B");
+        if (eb?.left) edges.push("L");
+        if (eb?.right) edges.push("R");
+
+        return `<tr>
+        <td><span class="badge">${piece.letter}</span></td>
+        <td>${piece.label}</td>
+        <td class="text-right mono">${piece.width} × ${piece.height} mm</td>
+        <td class="text-center" style="font-weight:600">${piece.quantity}</td>
+        <td style="text-transform:capitalize">${panel?.orientation || "horizontal"}</td>
+        <td>${edges.length ? edges.join(", ") : "—"}</td>
+      </tr>`;
+      })
+      .join("\n");
+
+    // Build cost section
+    let costHTML = "";
+    if (settings.sheetPrice || settings.edgeBandingPrice) {
+      costHTML = `
+        <div class="page-break"></div>
+        <div class="section">
+          <div class="section-title"><span class="section-num">3</span> Cost Estimate</div>
+          <div class="cost-row"><span class="label">Sheets (${costEstimate.totalSheets} × ${costEstimate.currency}${settings.sheetPrice})</span><span class="value">${costEstimate.currency}${costEstimate.sheetCost.toFixed(2)}</span></div>
+          ${settings.edgeBandingPrice && costEstimate.edgeBandingMeters > 0 ? `<div class="cost-row"><span class="label">Edge Banding (${costEstimate.edgeBandingMeters.toFixed(1)}m × ${costEstimate.currency}${settings.edgeBandingPrice})</span><span class="value">${costEstimate.currency}${costEstimate.edgeBandingCost.toFixed(2)}</span></div>` : ""}
+          <div class="cost-total"><span style="font-weight:600">Total</span><span class="value">${costEstimate.currency}${costEstimate.totalCost.toFixed(2)}</span></div>
+          <div class="warning-box" style="margin-top:1rem"><strong>Note:</strong> This is an estimate. Actual costs may vary based on supplier pricing and waste factors.</div>
+        </div>`;
+    }
+
+    const notesNum =
+      settings.sheetPrice || settings.edgeBandingPrice ? "4" : "3";
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${settings.projectName || "Project"} – Print</title><style>${PRINT_CSS}</style></head><body>
+
+      <div class="cover">
+        <div class="icon"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg></div>
+        <h1>${settings.projectName || "Furniture Project"}</h1>
+        <div class="subtitle">Production Documents</div>
+        <div class="stats"><div><b>${totalPanels}</b> Panels</div><div><b>${costEstimate.totalSheets}</b> Sheets</div><div><b>${100 - costEstimate.wastePercent}%</b> Efficiency</div></div>
+        <div class="date">${today}</div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="section-num">1</span> Parts List</div>
+        <table><thead><tr><th>ID</th><th>Name</th><th class="text-right">Dimensions</th><th class="text-center">Qty</th><th>Type</th><th>Edge Band</th></tr></thead><tbody>${partsRows}</tbody></table>
+        <div class="footer-row"><span>Material thickness: ${settings.thickness}mm</span><span>Total unique parts: ${groupedPieces.length}</span></div>
+      </div>
+
+      <div class="page-break"></div>
+
+      <div class="section">
+        <div class="section-title"><span class="section-num">2</span> Cutting Diagrams</div>
+        <div style="font-size:.85rem;color:#475569;margin-bottom:.75rem">Sheet size: ${settings.sheetWidth} × ${settings.sheetHeight} mm</div>
+        <div class="diagram-container">${diagramHTML}</div>
+      </div>
+
+      ${costHTML}
+
+      <div class="page-break"></div>
+
+      <div class="section">
+        <div class="section-title"><span class="section-num">${notesNum}</span> Notes</div>
+        <div class="note-box"><strong>Cutting Tips:</strong><ul><li>Allow 3mm kerf (blade width) between cuts</li><li>Cut larger pieces first to maximize material usage</li><li>Label each piece with its letter immediately after cutting</li><li>Check grain direction before cutting</li></ul></div>
+        <div class="note-box"><strong>Legend:</strong><ul><li><b>T/B/L/R</b> = Top/Bottom/Left/Right edge banding</li><li><b>↻</b> = Panel rotated 90° on cutting diagram</li></ul></div>
+        <div class="generated">Generated with CraftCut • ${today}</div>
+      </div>
+
+    </body></html>`;
+
+    // Create hidden iframe, print from it, then clean up
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText =
+      "position:fixed;top:0;left:0;width:0;height:0;border:none;visibility:hidden;";
+    document.body.appendChild(iframe);
+
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!iframeDoc) {
+      document.body.removeChild(iframe);
+      setIsPrinting(false);
+      return;
+    }
+
+    iframeDoc.open();
+    iframeDoc.write(html);
+    iframeDoc.close();
+
+    // Wait for the iframe content to fully load, then trigger print
+    iframe.onload = () => {
+      setTimeout(() => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        // Clean up after a short delay
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+          setIsPrinting(false);
+        }, 500);
+      }, 250);
+    };
+
+    // Fallback in case onload doesn't fire
+    setTimeout(() => {
+      try {
+        if (document.body.contains(iframe)) {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+          setTimeout(() => {
+            if (document.body.contains(iframe))
+              document.body.removeChild(iframe);
+            setIsPrinting(false);
+          }, 500);
+        }
+      } catch {
+        setIsPrinting(false);
+      }
+    }, 2000);
+  };
+
+  // Close on Escape
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   return (
-    <div className="print-booklet-container fixed inset-0 z-50 bg-gray-100 dark:bg-slate-900 overflow-auto print:bg-white print:static print:overflow-visible">
-      {/* Header - hidden when printing */}
-      <div className="sticky top-0 z-10 bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 px-4 py-3 flex items-center justify-between print:hidden">
+    <div className="fixed inset-0 z-50 bg-gray-100 dark:bg-slate-900 overflow-auto">
+      {/* Header */}
+      <div className="sticky top-0 z-10 bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button
             onClick={onClose}
@@ -217,8 +310,18 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
         <div className="bg-white rounded-lg shadow-sm p-8 mb-6 print:shadow-none print:rounded-none print:mb-0 print:min-h-[100vh] print:flex print:flex-col print:justify-center cover-page">
           <div className="text-center">
             <div className="w-20 h-20 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
-              <svg className="w-10 h-10 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              <svg
+                className="w-10 h-10 text-blue-600"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                />
               </svg>
             </div>
             <h1 className="text-4xl font-bold text-gray-900 mb-2">
@@ -228,15 +331,24 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
 
             <div className="inline-flex items-center gap-6 text-sm text-gray-600 border-t border-b border-gray-200 py-4 px-8">
               <div>
-                <span className="font-semibold text-gray-900">{totalPanels}</span> Panels
+                <span className="font-semibold text-gray-900">
+                  {totalPanels}
+                </span>{" "}
+                Panels
               </div>
               <div className="w-px h-4 bg-gray-300"></div>
               <div>
-                <span className="font-semibold text-gray-900">{costEstimate.totalSheets}</span> Sheets
+                <span className="font-semibold text-gray-900">
+                  {costEstimate.totalSheets}
+                </span>{" "}
+                Sheets
               </div>
               <div className="w-px h-4 bg-gray-300"></div>
               <div>
-                <span className="font-semibold text-gray-900">{100 - costEstimate.wastePercent}%</span> Efficiency
+                <span className="font-semibold text-gray-900">
+                  {100 - costEstimate.wastePercent}%
+                </span>{" "}
+                Efficiency
               </div>
             </div>
 
@@ -249,19 +361,33 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
         {/* Parts List */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6 print:shadow-none print:rounded-none print:mb-0 page-break-inside-avoid">
           <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <span className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 text-sm font-bold">1</span>
+            <span className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 text-sm font-bold">
+              1
+            </span>
             Parts List
           </h2>
-          
+
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b-2 border-gray-200">
-                <th className="text-left py-2 font-semibold text-gray-700">ID</th>
-                <th className="text-left py-2 font-semibold text-gray-700">Name</th>
-                <th className="text-right py-2 font-semibold text-gray-700">Dimensions</th>
-                <th className="text-center py-2 font-semibold text-gray-700">Qty</th>
-                <th className="text-left py-2 font-semibold text-gray-700">Type</th>
-                <th className="text-left py-2 font-semibold text-gray-700">Edge Band</th>
+                <th className="text-left py-2 font-semibold text-gray-700">
+                  ID
+                </th>
+                <th className="text-left py-2 font-semibold text-gray-700">
+                  Name
+                </th>
+                <th className="text-right py-2 font-semibold text-gray-700">
+                  Dimensions
+                </th>
+                <th className="text-center py-2 font-semibold text-gray-700">
+                  Qty
+                </th>
+                <th className="text-left py-2 font-semibold text-gray-700">
+                  Type
+                </th>
+                <th className="text-left py-2 font-semibold text-gray-700">
+                  Edge Band
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -311,15 +437,19 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
         {/* Cutting Diagrams */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6 print:shadow-none print:rounded-none print:mb-0">
           <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <span className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 text-sm font-bold">2</span>
+            <span className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 text-sm font-bold">
+              2
+            </span>
             Cutting Diagrams
           </h2>
-          
+
           <div className="text-sm text-gray-600 mb-4">
             Sheet size: {settings.sheetWidth} × {settings.sheetHeight} mm
           </div>
 
-          <CuttingDiagram />
+          <div ref={diagramRef}>
+            <CuttingDiagram />
+          </div>
         </div>
 
         <div className="page-break"></div>
@@ -328,7 +458,9 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
         {(settings.sheetPrice || settings.edgeBandingPrice) && (
           <div className="bg-white rounded-lg shadow-sm p-6 mb-6 print:shadow-none print:rounded-none print:mb-0 page-break-inside-avoid">
             <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <span className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 text-sm font-bold">3</span>
+              <span className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 text-sm font-bold">
+                3
+              </span>
               Cost Estimate
             </h2>
 
@@ -343,19 +475,21 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
                   {costEstimate.sheetCost.toFixed(2)}
                 </span>
               </div>
-              
-              {settings.edgeBandingPrice && costEstimate.edgeBandingMeters > 0 && (
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-gray-600">
-                    Edge Banding ({costEstimate.edgeBandingMeters.toFixed(1)}m × {costEstimate.currency}
-                    {settings.edgeBandingPrice})
-                  </span>
-                  <span className="font-semibold text-gray-900">
-                    {costEstimate.currency}
-                    {costEstimate.edgeBandingCost.toFixed(2)}
-                  </span>
-                </div>
-              )}
+
+              {settings.edgeBandingPrice &&
+                costEstimate.edgeBandingMeters > 0 && (
+                  <div className="flex justify-between py-2 border-b border-gray-100">
+                    <span className="text-gray-600">
+                      Edge Banding ({costEstimate.edgeBandingMeters.toFixed(1)}m
+                      × {costEstimate.currency}
+                      {settings.edgeBandingPrice})
+                    </span>
+                    <span className="font-semibold text-gray-900">
+                      {costEstimate.currency}
+                      {costEstimate.edgeBandingCost.toFixed(2)}
+                    </span>
+                  </div>
+                )}
 
               <div className="flex justify-between py-3 border-t-2 border-gray-200">
                 <span className="font-semibold text-gray-900">Total</span>
@@ -367,7 +501,8 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
             </div>
 
             <div className="mt-4 p-3 bg-amber-50 rounded-lg text-sm text-amber-800">
-              <strong>Note:</strong> This is an estimate. Actual costs may vary based on supplier pricing and waste factors.
+              <strong>Note:</strong> This is an estimate. Actual costs may vary
+              based on supplier pricing and waste factors.
             </div>
           </div>
         )}
@@ -387,18 +522,30 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
               <ul className="mt-2 space-y-1 list-disc list-inside">
                 <li>Allow 3mm kerf (blade width) between cuts</li>
                 <li>Cut larger pieces first to maximize material usage</li>
-                <li>Label each piece with its letter immediately after cutting</li>
-                <li>Check grain direction before cutting (marked with ═══ or ║)</li>
+                <li>
+                  Label each piece with its letter immediately after cutting
+                </li>
+                <li>
+                  Check grain direction before cutting (marked with ═══ or ║)
+                </li>
               </ul>
             </div>
 
             <div className="p-3 bg-gray-50 rounded-lg">
               <strong className="text-gray-900">Legend:</strong>
               <ul className="mt-2 space-y-1">
-                <li><strong>T/B/L/R</strong> = Top/Bottom/Left/Right edge banding</li>
-                <li><strong>↻</strong> = Panel rotated 90° on cutting diagram</li>
-                <li><strong>═══</strong> = Horizontal grain direction</li>
-                <li><strong>║</strong> = Vertical grain direction</li>
+                <li>
+                  <strong>T/B/L/R</strong> = Top/Bottom/Left/Right edge banding
+                </li>
+                <li>
+                  <strong>↻</strong> = Panel rotated 90° on cutting diagram
+                </li>
+                <li>
+                  <strong>═══</strong> = Horizontal grain direction
+                </li>
+                <li>
+                  <strong>║</strong> = Vertical grain direction
+                </li>
               </ul>
             </div>
 

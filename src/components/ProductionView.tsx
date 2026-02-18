@@ -8,7 +8,7 @@ import {
   DollarSign,
   Loader2,
 } from "lucide-react";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { generateAssemblySteps, getAssemblySummary } from "../lib/assembly";
 import { calculateGroupedCutList, optimizeCuts } from "../lib/optimizer";
 import { exportToPDF } from "../lib/pdf";
@@ -18,67 +18,138 @@ import AssemblyIllustration from "./AssemblyIllustration";
 import CuttingDiagram from "./CuttingDiagram";
 import Print3DImage from "./Print3DImage";
 
-// Print styles injected into document head
-const PRINT_STYLES = `
-@media print {
-  /* Hide everything outside production view */
-  body > *:not(.production-print-root) {
-    display: none !important;
-  }
-  
-  /* Reset body/html for print */
+// Self-contained print CSS for the iframe document
+const IFRAME_PRINT_CSS = `
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
-    height: auto !important;
-    overflow: visible !important;
-    background: white !important;
+    width: 100%; height: auto; overflow: visible;
+    background: white; color: #111827;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px; line-height: 1.5;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
-  
-  /* Production view takes full page */
-  .production-print-root {
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100% !important;
-    height: auto !important;
-    overflow: visible !important;
-    background: white !important;
-  }
-  
-  .production-print-root > div {
-    height: auto !important;
-    overflow: visible !important;
-  }
-  
-  .production-content {
-    max-width: 100% !important;
-    padding: 0 !important;
-    overflow: visible !important;
-  }
-  
-  .production-content > * {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-  
-  /* Section styling for print */
+  .no-print { display: none !important; }
+  .production-content { max-width: 100%; padding: 16px; }
+  .production-content > * { break-inside: avoid; page-break-inside: avoid; }
   .production-section {
-    border: 1px solid #ddd !important;
-    margin-bottom: 20px !important;
-    break-inside: avoid;
-    page-break-inside: avoid;
+    border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;
+    margin-bottom: 20px; break-inside: avoid; page-break-inside: avoid;
+    background: white;
   }
-  
-  /* Hide screen-only elements */
-  .no-print {
-    display: none !important;
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 6px 12px; text-align: left; border-bottom: 1px solid #f3f4f6; }
+  th { background: #f3f4f6; font-weight: 600; }
+  svg { max-width: 100%; height: auto; }
+  img { max-width: 100%; height: auto; object-fit: contain; }
+
+  /* Utility classes used in the content */
+  .flex { display: flex; }
+  .flex-col { flex-direction: column; }
+  .flex-1 { flex: 1; }
+  .flex-wrap { flex-wrap: wrap; }
+  .flex-shrink-0 { flex-shrink: 0; }
+  .items-center { align-items: center; }
+  .items-end { align-items: flex-end; }
+  .justify-center { justify-content: center; }
+  .justify-between { justify-content: space-between; }
+  .gap-2 { gap: 0.5rem; }
+  .gap-3 { gap: 0.75rem; }
+  .gap-4 { gap: 1rem; }
+  .gap-6 { gap: 1.5rem; }
+  .grid { display: grid; }
+  .grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .space-y-2 > * + * { margin-top: 0.5rem; }
+  .space-y-4 > * + * { margin-top: 1rem; }
+  .space-y-6 > * + * { margin-top: 1.5rem; }
+  .space-y-8 > * + * { margin-top: 2rem; }
+  .w-full { width: 100%; }
+  .w-6 { width: 1.5rem; }
+  .w-7 { width: 1.75rem; }
+  .w-8 { width: 2rem; }
+  .w-10 { width: 2.5rem; }
+  .w-16 { width: 4rem; }
+  .w-40 { width: 10rem; }
+  .h-6 { height: 1.5rem; }
+  .h-7 { height: 1.75rem; }
+  .h-8 { height: 2rem; }
+  .h-10 { height: 2.5rem; }
+  .h-16 { height: 4rem; }
+  .h-40 { height: 10rem; }
+  .p-2 { padding: 0.5rem; }
+  .p-3 { padding: 0.75rem; }
+  .p-4 { padding: 1rem; }
+  .p-6 { padding: 1.5rem; }
+  .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+  .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+  .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+  .pt-2 { padding-top: 0.5rem; }
+  .pt-4 { padding-top: 1rem; }
+  .mb-1 { margin-bottom: 0.25rem; }
+  .mb-2 { margin-bottom: 0.5rem; }
+  .mb-3 { margin-bottom: 0.75rem; }
+  .mb-4 { margin-bottom: 1rem; }
+  .mt-1 { margin-top: 0.25rem; }
+  .mt-2 { margin-top: 0.5rem; }
+  .mt-3 { margin-top: 0.75rem; }
+  .mx-auto { margin-left: auto; margin-right: auto; }
+  .text-xs { font-size: 0.75rem; line-height: 1rem; }
+  .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+  .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+  .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+  .text-2xl { font-size: 1.5rem; line-height: 2rem; }
+  .font-medium { font-weight: 500; }
+  .font-semibold { font-weight: 600; }
+  .font-bold { font-weight: 700; }
+  .font-mono { font-family: ui-monospace, SFMono-Regular, monospace; }
+  .text-center { text-align: center; }
+  .text-right { text-align: right; }
+  .uppercase { text-transform: uppercase; }
+  .tracking-wide { letter-spacing: 0.025em; }
+  .rounded { border-radius: 0.25rem; }
+  .rounded-lg { border-radius: 0.5rem; }
+  .rounded-full { border-radius: 9999px; }
+  .border { border-width: 1px; border-style: solid; }
+  .border-b { border-bottom-width: 1px; border-bottom-style: solid; }
+  .border-t { border-top-width: 1px; border-top-style: solid; }
+  .border-gray-100 { border-color: #f3f4f6; }
+  .border-gray-200 { border-color: #e5e7eb; }
+  .border-green-100 { border-color: #dcfce7; }
+  .border-green-200 { border-color: #bbf7d0; }
+  .border-amber-200 { border-color: #fde68a; }
+  .overflow-hidden { overflow: hidden; }
+  .inline-flex { display: inline-flex; }
+  .aspect-square { aspect-ratio: 1/1; }
+  .bg-white { background-color: white; }
+  .bg-gray-50 { background-color: #f9fafb; }
+  .bg-gray-100 { background-color: #f3f4f6; }
+  .bg-gray-200 { background-color: #e5e7eb; }
+  .bg-gray-900 { background-color: #111827; }
+  .bg-blue-50 { background-color: #eff6ff; }
+  .bg-blue-600 { background-color: #2563eb; }
+  .bg-green-600 { background-color: #16a34a; }
+  .bg-amber-50 { background-color: #fffbeb; }
+  .bg-amber-100 { background-color: #fef3c7; }
+  .text-white { color: white; }
+  .text-gray-500 { color: #6b7280; }
+  .text-gray-600 { color: #4b5563; }
+  .text-gray-700 { color: #374151; }
+  .text-gray-800 { color: #1f2937; }
+  .text-gray-900 { color: #111827; }
+  .text-blue-400 { color: #60a5fa; }
+  .text-blue-600 { color: #2563eb; }
+  .text-green-600 { color: #16a34a; }
+  .text-amber-700 { color: #b45309; }
+  .text-amber-800 { color: #92400e; }
+  .from-green-50 { /* gradient handled inline */ }
+  .bg-gradient-to-r.from-green-50.to-emerald-50 { background: linear-gradient(to right, #f0fdf4, #ecfdf5); }
+  .page-break-inside-avoid { break-inside: avoid; page-break-inside: avoid; }
+
+  @media print {
+    body { margin: 0; padding: 0; }
+    .production-section { box-shadow: none; }
   }
-  
-  /* Force backgrounds to print */
-  * {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-}
 `;
 
 // Get true dimensions based on orientation
@@ -229,7 +300,50 @@ export default function ProductionView() {
   };
 
   const handlePrint = () => {
-    window.print();
+    if (!contentRef.current) return;
+
+    // Clone the content so we don't mutate the live DOM
+    const clone = contentRef.current.cloneNode(true) as HTMLElement;
+    // Remove any no-print elements from the clone
+    clone.querySelectorAll('.no-print').forEach(el => el.remove());
+
+    // Collect all SVG inline styles (canvas elements won't copy, but SVGs will)
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Print Production Documents</title>
+<style>${IFRAME_PRINT_CSS}</style>
+</head><body>${clone.outerHTML}</body></html>`;
+
+    // Create a hidden iframe, write content, and print
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.left = '-9999px';
+    iframe.style.top = '0';
+    iframe.style.width = '210mm';
+    iframe.style.height = '297mm';
+    iframe.style.border = 'none';
+    document.body.appendChild(iframe);
+
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!iframeDoc) {
+      document.body.removeChild(iframe);
+      return;
+    }
+
+    iframeDoc.open();
+    iframeDoc.write(html);
+    iframeDoc.close();
+
+    // Wait for images/SVGs to render, then print
+    iframe.onload = () => {
+      setTimeout(() => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        // Clean up after print dialog closes
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+        }, 1000);
+      }, 300);
+    };
   };
 
   const handleExportPDF = async () => {
@@ -311,20 +425,7 @@ export default function ProductionView() {
     };
   }, [panels, settings, dimensionToLetter]);
 
-  // Inject print styles
-  useEffect(() => {
-    const styleId = "production-print-styles";
-    if (!document.getElementById(styleId)) {
-      const style = document.createElement("style");
-      style.id = styleId;
-      style.textContent = PRINT_STYLES;
-      document.head.appendChild(style);
-    }
-    return () => {
-      const style = document.getElementById(styleId);
-      if (style) style.remove();
-    };
-  }, []);
+  // No style injection needed — printing uses a self-contained iframe
 
   if (panels.length === 0) {
     return (
@@ -343,7 +444,7 @@ export default function ProductionView() {
   }
 
   return (
-    <div className="production-print-root h-full flex flex-col bg-gray-100 print:bg-white">
+    <div className="production-print-root h-full flex flex-col bg-gray-100">
       {/* Header - Hidden when printing */}
       <div className="no-print flex items-center justify-between p-4 bg-white border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -399,8 +500,8 @@ export default function ProductionView() {
       </div>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto print:overflow-visible">
-        <div ref={contentRef} className="production-content max-w-4xl mx-auto p-6 space-y-8 print:max-w-none print:p-4">
+      <div className="flex-1 overflow-auto">
+        <div ref={contentRef} className="production-content max-w-4xl mx-auto p-6 space-y-8">
           
           {/* Section 1: Project Overview */}
           <section className="production-section bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -413,12 +514,10 @@ export default function ProductionView() {
             <div className="p-6">
               <div className="grid grid-cols-2 gap-6">
                 {/* 3D Preview */}
-                <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
+                <div className="bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center" style={{ minHeight: 280 }}>
                   <Print3DImage
-                    panels={panels}
-                    settings={settings}
-                    cameraPosition="front-right"
-                    size={300}
+                    width={360}
+                    height={280}
                   />
                 </div>
                 

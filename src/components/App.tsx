@@ -8,6 +8,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useDesignStore } from "../stores/designStore";
 import { useProjectsStore } from "../stores/projectsStore";
+import { CraftCutLogo } from "./CraftCutLogo";
 import Editor from "./Editor";
 import ProjectsHome from "./ProjectsHome";
 import { InstallPrompt } from "./ui";
@@ -208,7 +209,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <CraftCutLogo size={48} variant="color" className="mx-auto mb-4 animate-pulse" />
           <p className="text-gray-500">Loading CraftCut...</p>
         </div>
       </div>

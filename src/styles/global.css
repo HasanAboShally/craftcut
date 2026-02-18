@@ -148,7 +148,8 @@
 }
 
 @keyframes pulse-subtle {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -214,39 +215,111 @@
    Print styles
    ============================================ */
 
+/* Screen-only: make page-break invisible */
+@media screen {
+  .page-break {
+    display: none;
+  }
+}
+
 @media print {
   @page {
     size: A4;
     margin: 12mm;
   }
 
+  /* ===========================================
+     1. KILL DARK MODE during print
+     =========================================== */
+  .dark .bg-white,
+  .dark .bg-gray-100,
+  .dark .bg-gray-50,
+  .dark .bg-slate-50,
+  .dark .bg-slate-100 {
+    background-color: white !important;
+  }
+
+  .dark .text-gray-900,
+  .dark .text-slate-900 {
+    color: #1e293b !important;
+  }
+
+  .dark .text-gray-800,
+  .dark .text-slate-800 {
+    color: #1e293b !important;
+  }
+
+  .dark .text-gray-700,
+  .dark .text-slate-700 {
+    color: #334155 !important;
+  }
+
+  .dark .text-gray-600,
+  .dark .text-slate-600 {
+    color: #475569 !important;
+  }
+
+  .dark .text-gray-500,
+  .dark .text-slate-500 {
+    color: #64748b !important;
+  }
+
+  .dark .text-gray-400,
+  .dark .text-slate-400 {
+    color: #94a3b8 !important;
+  }
+
+  .dark .text-white {
+    color: #1e293b !important;
+  }
+
+  .dark .border-gray-200,
+  .dark .border-gray-300,
+  .dark .border-slate-200,
+  .dark .border-slate-300,
+  .dark .border-slate-700 {
+    border-color: #e2e8f0 !important;
+  }
+
+  .dark .bg-slate-800,
+  .dark .bg-slate-900 {
+    background-color: white !important;
+  }
+
+  .dark body,
+  .dark .dark\:bg-slate-900,
+  .dark .dark\:bg-slate-800 {
+    background-color: white !important;
+    color: #1e293b !important;
+  }
+
+  /* ===========================================
+     2. Base print resets
+     =========================================== */
   html,
   body {
-    print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
     margin: 0 !important;
     padding: 0 !important;
     height: auto !important;
     overflow: visible !important;
     background: white !important;
+    color: #1e293b !important;
   }
 
-  /* When print view is open, hide everything except the print view */
+  /* ===========================================
+     3. PRINT VIEW (assembly guide)
+     =========================================== */
   body.print-view-open > *:not(.print-view-container) {
     display: none !important;
   }
 
-  /* Print view container styles for print */
   .print-view-container {
     position: static !important;
     overflow: visible !important;
     height: auto !important;
     z-index: auto !important;
-  }
-
-  /* Hide screen-only elements */
-  .print\:hidden {
-    display: none !important;
   }
 
   .print-content {
@@ -256,9 +329,11 @@
     overflow: visible !important;
   }
 
+  /* ===========================================
+     4. Page-break helpers
+     =========================================== */
   .cover-page {
-    height: 100vh !important;
-    min-height: unset !important;
+    min-height: 100vh !important;
     page-break-after: always !important;
     break-after: page !important;
   }
@@ -266,7 +341,6 @@
   .page-break {
     page-break-after: always !important;
     break-after: page !important;
-    page-break-before: auto;
     height: 0 !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -279,55 +353,16 @@
     break-inside: avoid !important;
   }
 
-  /* Hide screen-only elements */
-  .print\\:hidden {
-    display: none !important;
-  }
-
-  /* Ensure images print well */
+  /* ===========================================
+     5. General print cleanup
+     =========================================== */
   img {
     max-width: 100% !important;
     page-break-inside: avoid !important;
   }
 
-  /* Avoid breaks inside sections */
   section {
     page-break-inside: avoid;
     break-inside: avoid;
-  }
-}
-
-/* Screen-only: make page-break invisible */
-@media screen {
-  .page-break {
-    display: none;
-  }
-}
-
-/* Print booklet specific styles */
-@media print {
-  /* Hide everything except print booklet */
-  body.print-booklet-open > * {
-    display: none !important;
-  }
-  
-  /* But show the print booklet container */
-  body.print-booklet-open .print-booklet-container {
-    display: block !important;
-    position: static !important;
-    overflow: visible !important;
-    background: white !important;
-    width: 100% !important;
-    height: auto !important;
-  }
-  
-  body.print-booklet-open .print-booklet-container > div:first-child {
-    display: none !important; /* Hide the header */
-  }
-  
-  body.print-booklet-open .print-booklet-container > div:last-child {
-    max-width: none !important;
-    padding: 0 !important;
-    margin: 0 !important;
   }
 }
