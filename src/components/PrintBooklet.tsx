@@ -63,13 +63,35 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
   const [isPrinting, setIsPrinting] = useState(false);
 
   // Calculate cut list and optimization
-  const { groupedPieces, dimensionToLetter } = useMemo(() => {
+  const { dimensionToLetter } = useMemo(() => {
     return calculateGroupedCutList(
       panels,
       settings.thickness,
       settings.furnitureDepth || 400,
     );
   }, [panels, settings.thickness, settings.furnitureDepth]);
+
+  // Enrich each panel with its assigned cut-list letter (A, B, C…)
+  const groupedPieces = useMemo(() => {
+    return panels.map((panel) => {
+      const orientation = panel.orientation || "horizontal";
+      const depth = panel.depth || settings.furnitureDepth || 400;
+      let length: number, width: number;
+      if (orientation === "horizontal") { length = panel.width; width = depth; }
+      else if (orientation === "vertical") { length = panel.height; width = depth; }
+      else { length = panel.width; width = panel.height; }
+      if (width > length) { [length, width] = [width, length]; }
+      const letter = dimensionToLetter.get(`${length}x${width}`) ?? "?";
+      return {
+        sourceId: panel.id,
+        label: panel.label,
+        letter,
+        width: panel.width,
+        height: panel.height,
+        quantity: panel.quantity,
+      };
+    });
+  }, [panels, dimensionToLetter, settings.furnitureDepth]);
 
   const optimizationResult = useMemo(() => {
     return optimizeCuts(
@@ -307,7 +329,7 @@ export default function PrintBooklet({ onClose }: PrintBookletProps) {
         className="max-w-4xl mx-auto p-8 print:p-0 print:max-w-none"
       >
         {/* Cover Page */}
-        <div className="bg-white rounded-lg shadow-sm p-8 mb-6 print:shadow-none print:rounded-none print:mb-0 print:min-h-[100vh] print:flex print:flex-col print:justify-center cover-page">
+        <div className="bg-white rounded-lg shadow-sm p-8 mb-6 print:shadow-none print:rounded-none print:mb-0 print:min-h-screen print:flex print:flex-col print:justify-center cover-page">
           <div className="text-center">
             <div className="w-20 h-20 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
               <svg

@@ -226,7 +226,10 @@ export default function ProjectsHome({ onOpenProject }: ProjectsHomeProps) {
             <div className="flex items-center gap-3">
               <CraftCutLogo size={32} variant="color" label="" />
               <div>
-                <h1 className="text-xl font-bold text-gray-900">CraftCut</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-bold text-gray-900">CraftCut</h1>
+                  <span className="px-1.5 py-0.5 text-xs font-semibold bg-blue-100 text-blue-700 rounded">Beta</span>
+                </div>
                 <p className="text-sm text-gray-500">DIY Furniture Planner</p>
               </div>
             </div>

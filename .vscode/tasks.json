@@ -1,0 +1,12 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Astro Check",
+			"type": "shell",
+			"command": "npm run astro -- check",
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}

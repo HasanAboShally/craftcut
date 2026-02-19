@@ -255,7 +255,7 @@ const CuttingDiagram = memo(function CuttingDiagram() {
                               fontSize={10}
                               fill="#8b7355"
                               fontFamily="system-ui, sans-serif"
-                              title={`Grain: ${placement.grainDirection}`}
+                              aria-label={`Grain: ${placement.grainDirection}`}
                             >
                               {placement.grainDirection === "horizontal" ? "═══" : "║"}
                             </text>

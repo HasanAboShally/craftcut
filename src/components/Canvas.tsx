@@ -2600,7 +2600,13 @@ export default function Canvas() {
             fontWeight={600}
             pointerEvents="none"
           >
-            {Math.round(panel.width)} × {Math.round(panel.height)}
+            {(() => {
+              const ori = panel.orientation || "horizontal";
+              const depth = panel.depth ?? settings.furnitureDepth ?? 400;
+              if (ori === "vertical") return `${Math.round(panel.height)} × ${Math.round(depth)}`;
+              if (ori === "horizontal") return `${Math.round(panel.width)} × ${Math.round(depth)}`;
+              return `${Math.round(panel.width)} × ${Math.round(panel.height)}`;
+            })()}
           </text>
         )}
       </g>

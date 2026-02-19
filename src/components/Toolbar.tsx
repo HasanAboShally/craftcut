@@ -57,10 +57,11 @@ export default function Toolbar() {
         <div className="flex items-center gap-2 mr-4">
           <span className="text-xl">🪵</span>
           <h1 className="text-lg font-bold text-gray-800">CraftCut</h1>
+          <span className="px-1.5 py-0.5 text-xs font-semibold bg-blue-100 text-blue-700 rounded">Beta</span>
         </div>
 
         <button
-          onClick={addPanel}
+          onClick={() => addPanel()}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
         >
           <Plus size={16} />

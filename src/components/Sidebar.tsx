@@ -441,7 +441,7 @@ export default function Sidebar() {
               </svg>
             </div>
             <p className="text-sm font-medium text-gray-700 mb-1">No panel selected</p>
-            <p className="text-xs text-gray-400 max-w-[200px] mx-auto">
+            <p className="text-xs text-gray-400 max-w-50 mx-auto">
               Click on a panel in the canvas to edit its properties, or add a new panel using the button above.
             </p>
           </div>

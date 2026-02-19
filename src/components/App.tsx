@@ -5,7 +5,7 @@
  * Uses simple client-side routing based on URL hash or state.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useDesignStore } from "../stores/designStore";
 import { useProjectsStore } from "../stores/projectsStore";
 import { CraftCutLogo } from "./CraftCutLogo";
@@ -17,8 +17,7 @@ type View = "home" | "editor";
 
 // Migration: Check for legacy single-project data and convert to new multi-project format
 function migrateLegacyProject(
-  createProject: (name?: string) => string,
-  getProject: (id: string) => any
+  createProject: (name?: string) => string
 ): string | null {
   const LEGACY_KEY = "craftcut_design";
   const MIGRATION_FLAG = "craftcut_migrated_v2"; // v2 to re-run migration
@@ -85,8 +84,8 @@ export default function App() {
   const [view, setView] = useState<View>("home");
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
-  const { loadProject, saveProject, newProject, panels, settings } = useDesignStore();
-  const { updateProject, getProject, createProject, projects } = useProjectsStore();
+  const { loadProject, saveProject, panels, settings } = useDesignStore();
+  const { updateProject, getProject, createProject } = useProjectsStore();
 
   // Initialize: check for migration and URL hash
   useEffect(() => {
@@ -98,7 +97,7 @@ export default function App() {
     }
 
     // Try to migrate legacy data first
-    const migratedProjectId = migrateLegacyProject(createProject, getProject);
+    const migratedProjectId = migrateLegacyProject(createProject);
     
     // Check URL hash for direct project links
     const hash = window.location.hash;

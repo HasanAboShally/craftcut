@@ -778,7 +778,7 @@ export default function ProductionView() {
                       
                       {step.supportHint && (
                         <p className="text-amber-700 text-sm mt-2 bg-amber-50 px-2 py-1 rounded">
-                          💡 {step.supportHint.hint}
+                          💡 {step.supportHint.instruction}
                         </p>
                       )}
                       
