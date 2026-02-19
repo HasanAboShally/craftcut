@@ -4,7 +4,8 @@
   "version": "0.0.1",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "astro build && npm run copy-landing",
+    "copy-landing": "cp landing/about.html dist/about.html && cp landing/privacy.html dist/privacy.html && cp landing/terms.html dist/terms.html && cp -r landing/img dist/img",
     "preview": "astro preview",
     "astro": "astro"
   },
