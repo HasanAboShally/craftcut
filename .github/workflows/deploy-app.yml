@@ -31,4 +31,4 @@ jobs:
         run: npx wrangler pages deploy dist/ --project-name craftcut --branch main
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: 289914e27d269d31f8f133e580141680
+          CLOUDFLARE_ACCOUNT_ID: 4c67e6c0e7336b8e24e269deffc68306
