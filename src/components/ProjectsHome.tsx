@@ -315,7 +315,7 @@ export default function ProjectsHome({ onOpenProject }: ProjectsHomeProps) {
               <CraftCutLogo size={16} variant="mono" className="text-gray-400" label="" />
               <span>CraftCut</span>
             </div>
-            <span>© {new Date().getFullYear()} — Free & open-source DIY planner</span>
+            <span>© {new Date().getFullYear()} CraftCut</span>
           </div>
         </div>
       </footer>

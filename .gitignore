@@ -27,6 +27,7 @@ pnpm-debug.log*
 *.png
 !public/*.png
 !brand/**/*.png
+!landing/img/*.png
 
 # playwright testing artifacts
 .playwright-mcp/
